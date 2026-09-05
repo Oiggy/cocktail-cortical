@@ -129,10 +129,7 @@ double-checking.
 
 ## A note on BIDS conversion
 
-`mne-bids` can't write `.bdf` recordings as-is, so
-`data/bids_extraction.py` lets it convert them to BrainVision format
-(`.vhdr`/`.eeg`/`.vmrk`), which is what `analysis/experiment.py` expects
-to find. After running the extraction once, double check the file
-extension actually produced under `bids/sub-XX/eeg/` - if your installed
-`mne-bids` version converts to something else, update the `RawSource`
-pattern near the top of `analysis/experiment.py` to match.
+`mne-bids` keeps BioSemi recordings in their original `.bdf` format
+during conversion (confirmed: `data/bids_extraction.py`'s output is
+`bids/sub-XX/eeg/sub-XX_task-cocktail_eeg.bdf`), which is what
+`analysis/experiment.py`'s `RawSource` reads.

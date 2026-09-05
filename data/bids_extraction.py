@@ -100,16 +100,12 @@ for subject_dir in SUBJECT_FOLDERS:
 
     print(f"Wrote {subject_name} to {bids_path.directory}")
 
-# Note: BDF is not one of the formats mne-bids can write as-is, so it
-# converts the recording to BrainVision format (.vhdr/.eeg/.vmrk) during
-# the write above. After running this once, check the file extension
-# actually created under BIDS_ROOT/sub-XX/eeg/ and make sure it matches
-# the pattern used in analysis/experiment.py's RawSource (it expects
-# ``.vhdr``). If your mne-bids version converts to something else,
-# update that pattern to match.
+# Note: mne-bids keeps the recording in its original .bdf format here
+# (BDF doesn't need to be converted, unlike some other formats), so the
+# output is BIDS_ROOT/sub-XX/eeg/sub-XX_task-cocktail_eeg.bdf. This
+# matches the pattern used in analysis/experiment.py's RawSource.
 #
-# Bad channels and ICA: after this conversion, `experiment.py`'s raw
-# `sub-XX_..._eeg.vhdr` files have no bad-channel or ICA information yet
-# (those are per-subject files eelbrain creates the first time you ask
-# it to preprocess a subject - see the "Preprocessing" section of the
-# README for the exact commands).
+# Bad channels and ICA: after this conversion, those `.bdf` files have
+# no bad-channel or ICA information yet (those are per-subject files
+# eelbrain creates the first time you ask it to preprocess a subject -
+# see the "Preprocessing" section of the README for the exact commands).

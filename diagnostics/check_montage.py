@@ -46,10 +46,10 @@ DATA_ROOT = REPO_ROOT.parent / "dataset" / "cocktail"
 
 # Update the subject number below to point at any one subject's raw
 # recording.
-RAW_FILE = DATA_ROOT / 'bids' / 'sub-03' / 'eeg' / 'sub-03_task-cocktail_eeg.vhdr'
+RAW_FILE = DATA_ROOT / 'bids' / 'sub-03' / 'eeg' / 'sub-03_task-cocktail_eeg.bdf'
 MONTAGE_FILE = REPO_ROOT / 'analysis' / 'biosemi64mod.txt'
 
-raw = mne.io.read_raw_brainvision(RAW_FILE)
+raw = mne.io.read_raw_bdf(RAW_FILE)
 
 # %%
 print(' '.join(raw.info.ch_names))

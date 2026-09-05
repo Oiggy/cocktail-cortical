@@ -158,13 +158,12 @@ class BinauralCocktail(TRFExperiment):
     # the previous. For details see
     # https://eelbrain.readthedocs.io/en/stable/experiment.html
     raw = {
-        # The raw BIDS recording. If your mne-bids version wrote a
-        # different file format than BrainVision (.vhdr), update the
-        # pattern/reader below to match - see the note at the bottom of
-        # data/bids_extraction.py.
+        # The raw BIDS recording. mne-bids keeps BioSemi recordings in
+        # their original .bdf format rather than converting them, so
+        # this reads the same way the original .bdf files did.
         'raw': RawSource(
-            'eeg/{subject}_task-{recording}_eeg.vhdr',
-            reader=mne.io.read_raw_brainvision,
+            'eeg/{subject}_task-{recording}_eeg.bdf',
+            reader=mne.io.read_raw_bdf,
             eog=['EXG1', 'EXG2', 'EXG3', 'EXG4'],
             misc=['EXG7', 'EXG8', 'GSR1', 'GSR2', 'Erg1', 'Erg2', 'Resp', 'Plet', 'Temp'],
             adjacency='auto',
