@@ -70,9 +70,12 @@ conda activate cocktail-cortical
    (already saved in `experiment.py`; only needed if the stimuli change).
 3. **`predictors/gammatone_predictors.py`** - builds the cortical speech predictors
    (envelope and onset gammatone spectrograms) from the stimulus audio.
-4. **Preprocessing** (see below) - mark bad channels and fit ICA for
-   each subject. This is interactive, done once per subject, and its
-   results are cached to disk so you never repeat it.
+4. **`analysis/preprocessing.ipynb`** - mark bad channels and fit ICA
+   for each subject. This is interactive (you look at plots and click),
+   done once per subject, and its results are cached to disk so you
+   never repeat it. Open it in Jupyter, set `SUBJECT` at the top, run
+   the cells, then change `SUBJECT` and re-run for the next one
+   (sub-01 through sub-13).
 5. **`analysis/experiment.py`** - not run directly; it defines the
    eelbrain pipeline (preprocessing, epochs, predictors) that the
    analysis notebook imports.
@@ -81,37 +84,12 @@ conda activate cocktail-cortical
    binaural-cue comparison, and TRF/peak-time plots. Open it directly
    in Jupyter and run the cells top to bottom.
 
-## Preprocessing: bad channels and ICA
-
-No script in this repo does this - it's an interactive step you run
-once per subject directly in eelbrain, after `bids_extraction.py` and
-before running the analysis. For each subject:
-
-```python
-from experiment import e
-e.set(subject='sub-01')
-
-# Opens a plot of the raw EEG; click any consistently noisy electrode
-# to mark it bad. Saved automatically to
-# bids/sub-01/eeg/sub-01_task-cocktail-bad_channels.txt
-e.make_bad_channels()
-
-# Fits ICA (if not already cached) and opens a GUI to inspect the
-# components and mark the ones that are eye blinks/movement artifacts.
-# Saved automatically to bids/sub-01/eeg/sub-01 ica-ica.fif
-e.make_ica_selection(epoch='clean', decim=16)
-```
-
-Repeat for every subject before running `analysis/cortical_analysis.ipynb`
-- it needs the `ica` raw stage (see `experiment.py`'s `raw` dictionary),
-which depends on both of these being done first. Exact method names can
-vary slightly by eelbrain version; see
-https://eelbrain.readthedocs.io/en/stable/experiment.html for the
-current API.
-
-`analysis/cortical_analysis.ipynb` is a real Jupyter notebook file,
-committed as-is (clear the cell outputs before committing changes to
-it, so diffs stay readable). The scripts in `diagnostics/` are still
+`analysis/preprocessing.ipynb` and `analysis/cortical_analysis.ipynb`
+are real Jupyter notebook files, committed as-is (clear the cell
+outputs before committing changes to either, so diffs stay readable).
+Exact eelbrain method names in `preprocessing.ipynb` can vary slightly
+by version; see https://eelbrain.readthedocs.io/en/stable/experiment.html
+for the current API. The scripts in `diagnostics/` are still
 written in [jupytext](https://jupytext.readthedocs.io/) "percent"
 format (plain `.py`, paired with a local, not-committed `.ipynb`), so
 they can be opened directly as notebooks, or run top to bottom as
