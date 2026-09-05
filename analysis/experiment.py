@@ -1,9 +1,8 @@
 """
 What this file is for
 ----------------------
-- This file does two things: it defines the setup/config for the whole
-  project (how to find and clean the data), and it's also the one
-  place you run to do the interactive part of cleaning it.
+- This file does not analyze anything by itself. It's the setup/config
+  file for the whole project.
 - It tells eelbrain everything it needs to know about this dataset once,
   in one place: where the recordings are, how to clean them up, what
   the trigger codes mean, which stimulus goes with which EEG segment,
@@ -11,15 +10,13 @@ What this file is for
 - Every analysis script then just says "from experiment import e" and
   asks that object for what it needs (e.g. "give me the cleaned EEG
   for the diotic condition"), instead of repeating all of this setup
-  itself. Importing this file never launches anything interactive by
-  itself - see `preprocess_all_subjects()` below for the one
-  interactive step this project needs (marking bad channels and
-  picking ICA artifact components, once per subject). It's called
-  automatically as the second cell of analysis/cortical_analysis.ipynb,
-  so you normally never call it directly - but you can
-  (`python analysis/experiment.py`, or `e.preprocess_all_subjects()`
-  from any Python session) if you want to do that step on its own,
-  separately from the analysis notebook.
+  itself. Importing this file never launches anything interactive.
+- The one interactive step this project needs (marking bad channels
+  and picking ICA artifact components, once per subject) is
+  `preprocess_all_subjects()` below. It's called automatically as the
+  second cell of analysis/cortical_analysis.ipynb - you don't need to
+  call it yourself, but you can (`e.preprocess_all_subjects()`, from
+  any Python session) if you ever want to do that step on its own.
 
 What runs, top to bottom, the moment this file is imported
 ------------------------------------------------------------
@@ -45,8 +42,8 @@ What runs, top to bottom, the moment this file is imported
     - preprocess_all_subjects(): loops over every subject and runs the
       two interactive steps `raw` depends on (mark bad channels, pick
       ICA artifact components). This is a method, not a script, so it
-      only runs when you ask for it (see the bottom of this file).
-    - groups: a named shortcut for referring to a subset of subjects.
+      only runs when something calls it - see "What this file is for"
+      above for where that happens.
     - fix_events / label_events: how to figure out, from the trigger
       codes in the recording, which condition and which stimulus each
       segment was.
@@ -54,11 +51,9 @@ What runs, top to bottom, the moment this file is imported
       them up by condition (clean / diotic / binaural / dichotic).
     - predictors: which generated predictor files (from
       predictors/gammatone_predictors.py) are available to use in the analysis.
-- "e = BinauralCocktail(DATA_ROOT)" builds the one ready-to-use pipeline
-  object, `e`, that every analysis script imports.
-- Last line: `if __name__ == '__main__': e.preprocess_all_subjects()`.
-  This only fires when this file is run directly, never on import - see
-  "What this file is for" above.
+- Last line: "e = BinauralCocktail(DATA_ROOT)" builds the one
+  ready-to-use pipeline object, `e`, that every analysis script imports.
+  This is the only line that produces something other scripts use.
 """
 from eelbrain import Factor, Var
 from eelbrain.pipeline import *
@@ -227,12 +222,6 @@ class BinauralCocktail(TRFExperiment):
         '1-40-ica': RawApplyICA('1-40-mast', 'ica', cache=True),
     }
 
-    groups = {
-        # Subject 13 is analyzed separately in some notebooks, to check
-        # the predictive power of the averaged "mixture" predictor.
-        'mix-av': SubGroup('all', 'sub-13'),
-    }
-
     def preprocess_all_subjects(self, skip=()):
         """Run the interactive part of steps 1 and 4 of `raw`, for every subject.
 
@@ -318,11 +307,3 @@ class BinauralCocktail(TRFExperiment):
 # Creating the pipeline instance here means other scripts can just do
 # `from experiment import e` instead of repeating this setup.
 e = BinauralCocktail(DATA_ROOT)
-
-# This only runs when this file is executed directly
-# (`python analysis/experiment.py`), never when it's imported
-# (`from experiment import e`, what analysis/cortical_analysis.ipynb
-# does) - so importing this file is always safe and never launches the
-# interactive preprocessing by accident.
-if __name__ == '__main__':
-    e.preprocess_all_subjects()

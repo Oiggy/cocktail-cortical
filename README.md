@@ -89,13 +89,13 @@ conda activate cocktail-cortical
    comparison, and TRF/peak-time plots.
 
 If you'd rather do the bad-channel/ICA step on its own, separately
-from the analysis notebook, run `python analysis/experiment.py`
-instead (it does the same thing via the same method, triggered by a
-`if __name__ == '__main__':` guard at the bottom of the file - plain
-`from experiment import e` elsewhere never triggers it). Exact eelbrain
-method names in `preprocess_all_subjects()` can vary slightly by
-version; see https://eelbrain.readthedocs.io/en/stable/experiment.html
-for the current API.
+from the analysis notebook, open a Python session, `from experiment
+import e`, then call `e.preprocess_all_subjects()` yourself - it's the
+same method, just called by hand instead of from the notebook's cell.
+Exact eelbrain method names in `preprocess_all_subjects()` can vary
+slightly by version; see
+https://eelbrain.readthedocs.io/en/stable/experiment.html for the
+current API.
 
 `analysis/cortical_analysis.ipynb` is a real Jupyter notebook file,
 committed as-is (clear its cell outputs before committing changes to
