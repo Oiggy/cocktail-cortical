@@ -13,3 +13,7 @@ dependencies:
   - pip:
       # trftools isn't published on PyPI or conda-forge, only on GitHub.
       - git+https://github.com/christianbrodbeck/TRF-Tools.git
+      # eelbrain's gammatone_bank() needs this at runtime; it's an
+      # optional dependency eelbrain doesn't install for you, and it
+      # isn't on conda-forge either.
+      - gammatone
