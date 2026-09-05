@@ -1,0 +1,14 @@
+name: cocktail-cortical
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - eelbrain=0.43
+  - mne
+  - mne-bids
+  - seaborn
+  - numpy
+  - scipy
+  - pip
+  - pip:
+      - trftools
