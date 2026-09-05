@@ -11,4 +11,5 @@ dependencies:
   - scipy
   - pip
   - pip:
-      - trftools
+      # trftools isn't published on PyPI or conda-forge, only on GitHub.
+      - git+https://github.com/christianbrodbeck/TRF-Tools.git
