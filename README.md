@@ -16,18 +16,37 @@ cortical responses track the slower speech envelope).
 
 ## Data
 
-This repo analyzes the same EEG dataset as the original project it was
-adapted from: 12 subjects (numbered 3-14) listening to interleaved male
-and female speakers under four spatial conditions. It expects the data
-on disk (not committed to git) at:
+This repo analyzes the Binaural Cocktail EEG dataset: subjects listening
+to interleaved male and female speakers under four spatial conditions.
+
+Place your dataset on disk (not committed to git) at
+`~/Data/BinauralCocktail/`, so it looks like this:
 
 ```
 ~/Data/BinauralCocktail/
-  raw_data/      original BioSemi .bdf files, one per subject (S3.bdf, S4.bdf, ...)
+  eeg/           original BioSemi recordings, one folder per subject:
+                   eeg/s1/s1_cocktail.bdf
+                   eeg/s2/s2_cocktail.bdf
+                   ...
   bids/          created by data/bids_extraction.py
-  stimuli/       the 24 stimulus .wav files (male_1..12, female_1..12)
+  stimuli/       the stimulus .wav files (male_1..12, female_1..12,
+                 List_1_stim_1..12, List_2_stim_1..12)
   predictors/    created by predictors/gammatone.py
 ```
+
+If you already have a `dataset/` folder containing `eeg/` and
+`stimuli/` subfolders, just rename it and move it into place:
+
+```
+mv dataset ~/Data/BinauralCocktail
+```
+
+Your `eeg/sX/` folders may already contain a `-bad_channels.txt` and an
+`ica-ica.fif` from earlier work on this data - those were generated
+against the old (non-BIDS) folder layout eelbrain used to read from, so
+they won't be picked up once the recordings move to `bids/`. They're
+harmless to leave in place. See **Preprocessing** below for redoing
+that step under the new BIDS layout.
 
 ## Setup
 
@@ -44,12 +63,43 @@ conda activate cocktail-cortical
    (already saved in `experiment.py`; only needed if the stimuli change).
 3. **`predictors/gammatone.py`** - builds the cortical speech predictors
    (envelope and onset gammatone spectrograms) from the stimulus audio.
-4. **`analysis/experiment.py`** - not run directly; it defines the
+4. **Preprocessing** (see below) - mark bad channels and fit ICA for
+   each subject. This is interactive, done once per subject, and its
+   results are cached to disk so you never repeat it.
+5. **`analysis/experiment.py`** - not run directly; it defines the
    eelbrain pipeline (preprocessing, epochs, predictors) that the
    analysis notebook imports.
-5. **`analysis/cortical_analysis.py`** - the actual analysis: envelope
+6. **`analysis/cortical_analysis.py`** - the actual analysis: envelope
    model checks, the dichotic ear-of-presentation comparison, the
    binaural-cue comparison, and TRF/peak-time plots.
+
+## Preprocessing: bad channels and ICA
+
+No script in this repo does this - it's an interactive step you run
+once per subject directly in eelbrain, after `bids_extraction.py` and
+before running the analysis. For each subject:
+
+```python
+from experiment import e
+e.set(subject='sub-01')
+
+# Opens a plot of the raw EEG; click any consistently noisy electrode
+# to mark it bad. Saved automatically to
+# bids/sub-01/eeg/sub-01_task-cocktail-bad_channels.txt
+e.make_bad_channels()
+
+# Fits ICA (if not already cached) and opens a GUI to inspect the
+# components and mark the ones that are eye blinks/movement artifacts.
+# Saved automatically to bids/sub-01/eeg/sub-01 ica-ica.fif
+e.make_ica_selection(epoch='clean', decim=16)
+```
+
+Repeat for every subject before running `analysis/cortical_analysis.py`
+- it needs the `ica` raw stage (see `experiment.py`'s `raw` dictionary),
+which depends on both of these being done first. Exact method names can
+vary slightly by eelbrain version; see
+https://eelbrain.readthedocs.io/en/stable/experiment.html for the
+current API.
 
 `analysis/cortical_analysis.py` and the scripts in `diagnostics/` are
 written in [jupytext](https://jupytext.readthedocs.io/) "percent"

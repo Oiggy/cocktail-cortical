@@ -4,26 +4,35 @@ Convert the raw BioSemi recordings (.bdf files) into the BIDS folder format.
 Why: eelbrain's pipeline (see analysis/experiment.py) expects the EEG
 recordings to sit in a predictable, standardized folder layout. BIDS is
 that standard layout. Running this script once, before anything else,
-turns the messy "raw_data/S3.bdf, S4.bdf, ..." files into a clean
-"bids/sub-03/eeg/..., bids/sub-04/eeg/..." structure that the rest of the
-pipeline (and any other BIDS-aware tool) can read.
+turns the "eeg/s1/s1_cocktail.bdf, eeg/s2/s2_cocktail.bdf, ..." files
+into a "bids/sub-01/eeg/..., bids/sub-02/eeg/..." structure that the
+rest of the pipeline (and any other BIDS-aware tool) can read.
 
 Run this first, before predictors/gammatone.py or analysis/experiment.py.
+
+This only converts the raw recordings. Bad-channel marking and ICA
+fitting happen afterwards, interactively, through eelbrain itself (see
+the note at the bottom of this file) - they are not part of this script.
 """
+import re
 from pathlib import Path
 
 import mne
 from mne_bids import BIDSPath, write_raw_bids
 
-# Where the original .bdf files live, and where the BIDS copy should go.
-RAW_DATA_DIR = Path("~/Data/BinauralCocktail/raw_data").expanduser()
+# Where the original .bdf files live (one subfolder per subject, e.g.
+# eeg/s1/s1_cocktail.bdf), and where the BIDS copy should go.
+RAW_DATA_DIR = Path("~/Data/BinauralCocktail/eeg").expanduser()
 BIDS_ROOT = Path("~/Data/BinauralCocktail/bids").expanduser()
 
 TASK_NAME = "cocktail"
 
-# Subjects 1 and 2 were pilot recordings and are excluded, matching the
-# rest of the scripts in this repo (they only ever refer to subjects 3-14).
-SUBJECT_NUMBERS = range(3, 15)
+# Find every subject folder (s1, s2, s3, ...) instead of hard-coding a
+# subject count, so this keeps working if subjects are added or removed.
+SUBJECT_FOLDERS = sorted(
+    (p for p in RAW_DATA_DIR.iterdir() if p.is_dir() and re.fullmatch(r"s\d+", p.name)),
+    key=lambda p: int(p.name[1:]),
+)
 
 # The BioSemi cap has extra channels beyond the 64 EEG electrodes: four
 # electrodes around the eyes (used to detect blinks/eye movements) and a
@@ -57,8 +66,10 @@ EVENT_ID = {
     "code_8": 8,
 }
 
-for subject_num in SUBJECT_NUMBERS:
-    raw_file = RAW_DATA_DIR / f"S{subject_num}.bdf"
+for subject_dir in SUBJECT_FOLDERS:
+    subject_name = subject_dir.name  # e.g. "s13"
+    subject_num = int(subject_name[1:])
+    raw_file = subject_dir / f"{subject_name}_cocktail.bdf"
 
     raw = mne.io.read_raw_bdf(raw_file, preload=False)
     raw.set_channel_types(CHANNEL_TYPES, on_unit_change="ignore")
@@ -82,7 +93,7 @@ for subject_num in SUBJECT_NUMBERS:
         overwrite=True,
     )
 
-    print(f"Wrote subject {subject_num} to {bids_path.directory}")
+    print(f"Wrote {subject_name} to {bids_path.directory}")
 
 # Note: BDF is not one of the formats mne-bids can write as-is, so it
 # converts the recording to BrainVision format (.vhdr/.eeg/.vmrk) during
@@ -91,3 +102,9 @@ for subject_num in SUBJECT_NUMBERS:
 # the pattern used in analysis/experiment.py's RawSource (it expects
 # ``.vhdr``). If your mne-bids version converts to something else,
 # update that pattern to match.
+#
+# Bad channels and ICA: after this conversion, `experiment.py`'s raw
+# `sub-XX_..._eeg.vhdr` files have no bad-channel or ICA information yet
+# (those are per-subject files eelbrain creates the first time you ask
+# it to preprocess a subject - see the "Preprocessing" section of the
+# README for the exact commands).
