@@ -34,9 +34,12 @@ you've cloned the repo:
                        eeg/s2/s2_cocktail.bdf
                        ...
       bids/          created by data/bids_extraction.py
+        derivatives/
+          predictors/  created by predictors/gammatone_predictors.py
+                       (TRFExperiment looks for predictors here, not
+                       directly under bids/)
       stimuli/       the stimulus .wav files (male_1..12, female_1..12,
                      List_1_stim_1..12, List_2_stim_1..12)
-      predictors/    created by predictors/gammatone_predictors.py
 ```
 
 Every script works this location out on its own, from its own file

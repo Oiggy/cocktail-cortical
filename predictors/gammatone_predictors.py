@@ -31,7 +31,9 @@ from eelbrain import *
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = REPO_ROOT.parent / "dataset" / "cocktail"
 STIMULUS_DIR = DATA_ROOT / "stimuli"
-PREDICTOR_DIR = DATA_ROOT / "predictors"
+# TRFExperiment looks for predictors under <BIDS root>/derivatives/predictors,
+# not <BIDS root>/predictors - this has to match that exactly.
+PREDICTOR_DIR = DATA_ROOT / "bids" / "derivatives" / "predictors"
 
 # The 24 audio stimuli used in the experiment: 12 recordings from a male
 # speaker, 12 from a female speaker.

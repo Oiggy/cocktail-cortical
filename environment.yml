@@ -1,19 +1,37 @@
+# This environment matches the one the trftools maintainer publishes
+# for exactly this setup (BIDS + eelbrain's Pipeline + TRFExperiment):
+# https://github.com/christianbrodbeck/TRF-Tools/blob/main/env-trf.yml
+#
+# Why the extra channel: TRFExperiment (used in analysis/experiment.py)
+# needs eelbrain's `Pipeline` class, which only exists in eelbrain's
+# in-development BIDS support - not yet in a stable release. That
+# in-development version is only published on this "eelbrain_dev"
+# label, not on the regular conda-forge channel or PyPI (where the
+# newest version is still 0.41.2, without `Pipeline`). This is also
+# why no Python version is pinned below: the dev builds require
+# Python 3.12 or 3.13, so letting conda pick avoids a conflict.
 name: cocktail-cortical
 channels:
   - conda-forge
+  - conda-forge/label/eelbrain_dev
 dependencies:
-  - python=3.10
-  - eelbrain=0.41.2
-  - mne
-  - mne-bids
-  - seaborn
-  - numpy
-  - scipy
+  - eelbrain>=0.42.0a4
   - pip
+  - ipython
+  - jupyter
+  - ipywidgets
+  - jupytext
+  - seaborn
   - pip:
-      # trftools isn't published on PyPI or conda-forge, only on GitHub.
-      - git+https://github.com/christianbrodbeck/TRF-Tools.git
+      # mne and mne-bids come along automatically as eelbrain's own
+      # dependencies - no need to list them separately.
+      #
       # eelbrain's gammatone_bank() needs this at runtime; it's an
       # optional dependency eelbrain doesn't install for you, and it
       # isn't on conda-forge either.
       - gammatone
+      # trftools isn't published on PyPI or conda-forge, only on
+      # GitHub. Its `main` branch is the actively developed BIDS
+      # pipeline this repo needs (there's no separate "bids" branch
+      # anymore - BIDS support was merged into main).
+      - https://github.com/christianbrodbeck/TRF-Tools/archive/refs/heads/main.zip
