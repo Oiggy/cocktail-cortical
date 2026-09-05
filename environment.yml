@@ -23,9 +23,22 @@ dependencies:
   - jupytext
   - seaborn
   - pip:
-      # mne and mne-bids come along automatically as eelbrain's own
-      # dependencies - no need to list them separately.
-      #
+      # --no-deps matters here: trftools' own setup.py requires
+      # "eelbrain >=0.41", and pip reads the conda-installed dev-alpha
+      # eelbrain's version as "0.0.0" (a metadata quirk of its
+      # pre-release build), which looks like it fails that check. Left
+      # alone, pip "fixes" this by silently downloading and building
+      # the real eelbrain 0.41.2 from PyPI on top of it - undoing the
+      # whole point of the eelbrain_dev channel above and bringing
+      # back the "cannot import name 'Pipeline'" error. --no-deps
+      # stops pip from touching eelbrain at all; the few packages
+      # trftools actually needs are listed explicitly below instead.
+      - --no-deps
+      # trftools' actual dependencies (from its setup.py), minus
+      # eelbrain itself, which conda already installed above.
+      - textgrid
+      - filelock
+      - appdirs
       # eelbrain's gammatone_bank() needs this at runtime; it's an
       # optional dependency eelbrain doesn't install for you, and it
       # isn't on conda-forge either.
