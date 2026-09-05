@@ -19,27 +19,29 @@ cortical responses track the slower speech envelope).
 This repo analyzes the Binaural Cocktail EEG dataset: subjects listening
 to interleaved male and female speakers under four spatial conditions.
 
-Place your dataset on disk (not committed to git) at
-`~/Data/BinauralCocktail/`, so it looks like this:
+Data lives outside this repo, as a sibling folder next to it:
 
 ```
-~/Data/BinauralCocktail/
-  eeg/           original BioSemi recordings, one folder per subject:
-                   eeg/s1/s1_cocktail.bdf
-                   eeg/s2/s2_cocktail.bdf
-                   ...
-  bids/          created by data/bids_extraction.py
-  stimuli/       the stimulus .wav files (male_1..12, female_1..12,
-                 List_1_stim_1..12, List_2_stim_1..12)
-  predictors/    created by predictors/gammatone.py
+Github Repositories/
+  cocktail-cortical/                 this repo
+  dataset/
+    cocktail/
+      eeg/           original BioSemi recordings, one folder per subject:
+                       eeg/s1/s1_cocktail.bdf
+                       eeg/s2/s2_cocktail.bdf
+                       ...
+      bids/          created by data/bids_extraction.py
+      stimuli/       the stimulus .wav files (male_1..12, female_1..12,
+                     List_1_stim_1..12, List_2_stim_1..12)
+      predictors/    created by predictors/gammatone.py
 ```
 
-If you already have a `dataset/` folder containing `eeg/` and
-`stimuli/` subfolders, just rename it and move it into place:
-
-```
-mv dataset ~/Data/BinauralCocktail
-```
+All the data paths in the scripts (`DATA_ROOT` in
+`data/bids_extraction.py`, `predictors/gammatone.py`,
+`predictors/duration.py`, `diagnostics/explore_gammatone_settings.py`,
+and `analysis/experiment.py`) point directly at
+`/Users/joshuaighalo/Github Repositories/dataset/cocktail`. If you move
+the dataset elsewhere, update `DATA_ROOT` in each of those files.
 
 Your `eeg/sX/` folders may already contain a `-bad_channels.txt` and an
 `ica-ica.fif` from earlier work on this data - those were generated

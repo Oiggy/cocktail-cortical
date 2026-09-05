@@ -28,7 +28,7 @@ import numpy
 from eelbrain import *
 
 
-DATA_ROOT = Path("~/Data/BinauralCocktail").expanduser()
+DATA_ROOT = Path("/Users/joshuaighalo/Github Repositories/dataset/cocktail")
 STIMULUS_DIR = DATA_ROOT / 'stimuli'
 
 # %% [markdown]

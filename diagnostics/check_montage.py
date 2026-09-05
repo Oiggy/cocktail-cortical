@@ -30,7 +30,7 @@
 import mne
 
 
-RAW_FILE = '~/Data/BinauralCocktail/eeg/sub-03/sub-03_task-cocktail_eeg.vhdr'
+RAW_FILE = '/Users/joshuaighalo/Github Repositories/dataset/cocktail/bids/sub-03/eeg/sub-03_task-cocktail_eeg.vhdr'
 MONTAGE_FILE = '../analysis/biosemi64mod.txt'
 
 raw = mne.io.read_raw_brainvision(RAW_FILE)

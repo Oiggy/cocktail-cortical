@@ -24,7 +24,7 @@ import mne
 #   bids/        the BIDS-formatted EEG recordings (data/bids_extraction.py)
 #   stimuli/     the stimulus .wav files
 #   predictors/  the generated predictor files (predictors/gammatone.py)
-DATA_ROOT = "~/Data/BinauralCocktail"
+DATA_ROOT = "/Users/joshuaighalo/Github Repositories/dataset/cocktail"
 
 # Each audio stimulus has a different length. This tells the pipeline how
 # long to make the EEG segment ("epoch") for each one.

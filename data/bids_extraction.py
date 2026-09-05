@@ -22,8 +22,9 @@ from mne_bids import BIDSPath, write_raw_bids
 
 # Where the original .bdf files live (one subfolder per subject, e.g.
 # eeg/s1/s1_cocktail.bdf), and where the BIDS copy should go.
-RAW_DATA_DIR = Path("~/Data/BinauralCocktail/eeg").expanduser()
-BIDS_ROOT = Path("~/Data/BinauralCocktail/bids").expanduser()
+DATA_ROOT = Path("/Users/joshuaighalo/Github Repositories/dataset/cocktail")
+RAW_DATA_DIR = DATA_ROOT / "eeg"
+BIDS_ROOT = DATA_ROOT / "bids"
 
 TASK_NAME = "cocktail"
 

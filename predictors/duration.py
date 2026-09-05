@@ -31,7 +31,7 @@ from pathlib import Path
 from eelbrain import load
 
 
-DATA_ROOT = Path("~/Data/BinauralCocktail").expanduser()
+DATA_ROOT = Path("/Users/joshuaighalo/Github Repositories/dataset/cocktail")
 STIMULUS_DIR = DATA_ROOT / 'stimuli'
 
 # %%

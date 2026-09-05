@@ -27,7 +27,7 @@ from eelbrain import *
 # Where the stimulus audio lives, and where to save the generated
 # predictors. These sit next to (not inside) the BIDS folder, since BIDS
 # is only for the EEG recordings themselves.
-DATA_ROOT = Path("~/Data/BinauralCocktail").expanduser()
+DATA_ROOT = Path("/Users/joshuaighalo/Github Repositories/dataset/cocktail")
 STIMULUS_DIR = DATA_ROOT / "stimuli"
 PREDICTOR_DIR = DATA_ROOT / "predictors"
 
