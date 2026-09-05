@@ -74,9 +74,10 @@ conda activate cocktail-cortical
 5. **`analysis/experiment.py`** - not run directly; it defines the
    eelbrain pipeline (preprocessing, epochs, predictors) that the
    analysis notebook imports.
-6. **`analysis/cortical_analysis.py`** - the actual analysis: envelope
+6. **`analysis/cortical_analysis.ipynb`** - the actual analysis: envelope
    model checks, the dichotic ear-of-presentation comparison, the
-   binaural-cue comparison, and TRF/peak-time plots.
+   binaural-cue comparison, and TRF/peak-time plots. Open it directly
+   in Jupyter and run the cells top to bottom.
 
 ## Preprocessing: bad channels and ICA
 
@@ -99,17 +100,20 @@ e.make_bad_channels()
 e.make_ica_selection(epoch='clean', decim=16)
 ```
 
-Repeat for every subject before running `analysis/cortical_analysis.py`
+Repeat for every subject before running `analysis/cortical_analysis.ipynb`
 - it needs the `ica` raw stage (see `experiment.py`'s `raw` dictionary),
 which depends on both of these being done first. Exact method names can
 vary slightly by eelbrain version; see
 https://eelbrain.readthedocs.io/en/stable/experiment.html for the
 current API.
 
-`analysis/cortical_analysis.py` and the scripts in `diagnostics/` are
+`analysis/cortical_analysis.ipynb` is a real Jupyter notebook file,
+committed as-is (clear the cell outputs before committing changes to
+it, so diffs stay readable). The scripts in `diagnostics/` are still
 written in [jupytext](https://jupytext.readthedocs.io/) "percent"
-format, so they can be opened directly as Jupyter notebooks, or run top
-to bottom as plain scripts.
+format (plain `.py`, paired with a local, not-committed `.ipynb`), so
+they can be opened directly as notebooks, or run top to bottom as
+plain scripts.
 
 ## `diagnostics/` - one-off diagnostic scripts
 

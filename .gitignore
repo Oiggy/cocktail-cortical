@@ -39,9 +39,13 @@ coverage/
 .pytest_cache/
 doc/auto_examples
 *.ipynb
+# cortical_analysis.ipynb is the committed exception: it's the actual
+# notebook for the main analysis, not jupytext's paired byproduct.
+!analysis/cortical_analysis.ipynb
 .ipynb_checkpoints
 
-# Data is not tracked in git - it stays on disk under ~/Data/BinauralCocktail
+# Data is not tracked in git - it lives in a sibling dataset/cocktail
+# folder next to this repo, not inside it.
 *.bdf
 *.vhdr
 *.vmrk
