@@ -3,7 +3,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10
-  - eelbrain=0.43
+  - eelbrain=0.41.2
   - mne
   - mne-bids
   - seaborn

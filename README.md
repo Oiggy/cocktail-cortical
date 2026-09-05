@@ -1,7 +1,9 @@
 # Cocktail Cortical
 
 Cortical TRF (temporal response function) analysis of the Binaural
-Cocktail EEG dataset, built on eelbrain 0.43.
+Cocktail EEG dataset, built on eelbrain 0.41.2 (the latest version
+actually released; eelbrain never had a 0.43 release, on conda-forge
+or PyPI - the highest version either has is 0.41.2).
 
 This repo answers a specific question: how well does the cortical (slow,
 speech-envelope-tracking) EEG response reflect the foreground story a
