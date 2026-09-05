@@ -14,20 +14,23 @@ What this file is for
   it, and running data/bids_extraction.py plus predictors/gammatone.py
   first is what actually creates the files this setup points to.
 
-How this file is organized, top to bottom
-------------------------------------------
-- DATA_ROOT: the one folder everything else in this file is found
-  relative to.
-- SEGMENT_DURATION: how long (in seconds) each audio stimulus is, so
-  eelbrain knows how much EEG to cut out for each one.
-- CH_MAP: renames the EEG cap's numbered electrodes (A1, A2, ...) to
-  their standard names (Fp1, AF7, ...) that other software recognizes.
-- MONTAGE: the physical 3D position of each electrode, needed to draw
-  scalp maps.
-- SPEAKER / SPATIAL / SIDE: describe the experiment design itself, i.e.
-  which speaker, which listening condition, and which ear applied to
-  each of the 12 segments a subject heard.
-- The BinauralCocktail class: the actual pipeline definition. Inside it:
+What runs, top to bottom, the moment this file is imported
+------------------------------------------------------------
+- Work out DATA_ROOT: the one folder everything else below is found in.
+- Build SEGMENT_DURATION: a lookup table of how long (in seconds) each
+  audio stimulus is, so eelbrain knows how much EEG to cut out for each
+  one.
+- Build CH_MAP: renames the EEG cap's numbered electrodes (A1, A2, ...)
+  to their standard names (Fp1, AF7, ...) that other software recognizes.
+- Load MONTAGE from biosemi64mod.txt: the physical 3D position of each
+  electrode, needed to draw scalp maps.
+- Build SPEAKER / SPATIAL / SIDE: lookup tables describing the
+  experiment design itself, i.e. which speaker, which listening
+  condition, and which ear applied to each of the 12 segments a
+  subject heard.
+- Define the BinauralCocktail class. Defining a class doesn't run
+  anything by itself, it just registers the rules eelbrain will follow
+  later, once a subject is actually requested. Those rules are:
     - raw: the cleanup steps applied to the EEG, in order (filtering,
       re-referencing, removing eye-blink artifacts with ICA).
     - groups: a named shortcut for referring to a subset of subjects.
@@ -38,8 +41,9 @@ How this file is organized, top to bottom
       them up by condition (clean / diotic / binaural / dichotic).
     - predictors: which generated predictor files (from
       predictors/gammatone.py) are available to use in the analysis.
-- The last line, "e = BinauralCocktail(DATA_ROOT)", creates the one
-  ready-to-use object that every other script imports.
+- Last line: "e = BinauralCocktail(DATA_ROOT)" actually builds the one
+  ready-to-use pipeline object, `e`, that every other script imports.
+  This is the only line that produces something other scripts use.
 """
 from eelbrain import Factor, Var
 from eelbrain.pipeline import *
