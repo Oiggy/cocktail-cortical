@@ -11,12 +11,15 @@ What this file is for
 - Every analysis script then just says "from experiment import e" and
   asks that object for what it needs (e.g. "give me the cleaned EEG
   for the diotic condition"), instead of repeating all of this setup
-  itself. Importing this file never launches anything interactive.
-- Running this file directly (`python analysis/experiment.py`) is how
-  you do the one interactive step this project needs: marking bad
-  channels and picking ICA artifact components, once per subject (see
-  `preprocess_all_subjects()` below). Run this after
-  data/bids_extraction.py and predictors/gammatone_predictors.py.
+  itself. Importing this file never launches anything interactive by
+  itself - see `preprocess_all_subjects()` below for the one
+  interactive step this project needs (marking bad channels and
+  picking ICA artifact components, once per subject). It's called
+  automatically as the second cell of analysis/cortical_analysis.ipynb,
+  so you normally never call it directly - but you can
+  (`python analysis/experiment.py`, or `e.preprocess_all_subjects()`
+  from any Python session) if you want to do that step on its own,
+  separately from the analysis notebook.
 
 What runs, top to bottom, the moment this file is imported
 ------------------------------------------------------------
