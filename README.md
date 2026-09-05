@@ -63,7 +63,20 @@ that step under the new BIDS layout.
 ```
 conda env create -f environment.yml
 conda activate cocktail-cortical
+pip install --no-deps https://github.com/christianbrodbeck/TRF-Tools/archive/refs/heads/main.zip
+pip install textgrid filelock appdirs gammatone
 ```
+
+Why two separate pip commands instead of listing everything in
+`environment.yml`: `trftools`'s own setup.py requires `eelbrain
+>=0.41`, but pip reads the dev-alpha eelbrain conda just installed as
+version `"0.0.0"` (a metadata quirk of its pre-release build), decides
+that fails the check, and "fixes" it by downloading and installing the
+real eelbrain 0.41.2 from PyPI right over it - undoing everything
+above and bringing back the `Pipeline` import error. `--no-deps` stops
+that; the second command installs the few things `trftools` actually
+needs (`textgrid`, `filelock`, `appdirs`) plus `gammatone` (needed by
+`predictors/gammatone_predictors.py`) without touching eelbrain.
 
 ## Pipeline (run in this order)
 
