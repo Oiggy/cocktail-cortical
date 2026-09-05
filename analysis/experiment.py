@@ -1,18 +1,22 @@
 """
 What this file is for
 ----------------------
-- This file does not analyze anything by itself. It's the setup/config
-  file for the whole project.
+- This file does two things: it defines the setup/config for the whole
+  project (how to find and clean the data), and it's also the one
+  place you run to do the interactive part of cleaning it.
 - It tells eelbrain everything it needs to know about this dataset once,
   in one place: where the recordings are, how to clean them up, what
   the trigger codes mean, which stimulus goes with which EEG segment,
   and so on.
-- Every other script then just says "from experiment import e" and asks
-  that object for what it needs (e.g. "give me the cleaned EEG for the
-  diotic condition"), instead of repeating all of this setup itself.
-- You should never need to run this file directly. Other scripts import
-  it, and running data/bids_extraction.py plus predictors/gammatone_predictors.py
-  first is what actually creates the files this setup points to.
+- Every analysis script then just says "from experiment import e" and
+  asks that object for what it needs (e.g. "give me the cleaned EEG
+  for the diotic condition"), instead of repeating all of this setup
+  itself. Importing this file never launches anything interactive.
+- Running this file directly (`python analysis/experiment.py`) is how
+  you do the one interactive step this project needs: marking bad
+  channels and picking ICA artifact components, once per subject (see
+  `preprocess_all_subjects()` below). Run this after
+  data/bids_extraction.py and predictors/gammatone_predictors.py.
 
 What runs, top to bottom, the moment this file is imported
 ------------------------------------------------------------
@@ -32,7 +36,13 @@ What runs, top to bottom, the moment this file is imported
   anything by itself, it just registers the rules eelbrain will follow
   later, once a subject is actually requested. Those rules are:
     - raw: the cleanup steps applied to the EEG, in order (filtering,
-      re-referencing, removing eye-blink artifacts with ICA).
+      re-referencing, removing eye-blink artifacts with ICA). See the
+      numbered comments on this dict for exactly where the two
+      interactive steps below plug in.
+    - preprocess_all_subjects(): loops over every subject and runs the
+      two interactive steps `raw` depends on (mark bad channels, pick
+      ICA artifact components). This is a method, not a script, so it
+      only runs when you ask for it (see the bottom of this file).
     - groups: a named shortcut for referring to a subset of subjects.
     - fix_events / label_events: how to figure out, from the trigger
       codes in the recording, which condition and which stimulus each
@@ -41,9 +51,11 @@ What runs, top to bottom, the moment this file is imported
       them up by condition (clean / diotic / binaural / dichotic).
     - predictors: which generated predictor files (from
       predictors/gammatone_predictors.py) are available to use in the analysis.
-- Last line: "e = BinauralCocktail(DATA_ROOT)" actually builds the one
-  ready-to-use pipeline object, `e`, that every other script imports.
-  This is the only line that produces something other scripts use.
+- "e = BinauralCocktail(DATA_ROOT)" builds the one ready-to-use pipeline
+  object, `e`, that every analysis script imports.
+- Last line: `if __name__ == '__main__': e.preprocess_all_subjects()`.
+  This only fires when this file is run directly, never on import - see
+  "What this file is for" above.
 """
 from eelbrain import Factor, Var
 from eelbrain.pipeline import *
@@ -157,9 +169,9 @@ class BinauralCocktail(TRFExperiment):
     # The preprocessing steps applied to the raw EEG, each one building on
     # the previous. This dict only describes *how* to compute each stage -
     # two of the stages below (1 and 4) also need a human to look at a
-    # plot and click, which happens by running
-    # analysis/preprocess_subjects.py, not by anything written here. For
-    # full details on the raw-processing pipeline see
+    # plot and click, which happens by calling preprocess_all_subjects()
+    # below, not by anything written in this dict itself. For full
+    # details on the raw-processing pipeline see
     # https://eelbrain.readthedocs.io/en/stable/experiment.html
     raw = {
         # STEP 1 - load the recording. mne-bids keeps BioSemi recordings
@@ -170,8 +182,9 @@ class BinauralCocktail(TRFExperiment):
         # moment this stage loads - not because this dict says so, but
         # because RawSource always checks for a per-subject
         # bad-channels file first. That file is created by running
-        # `e.make_bad_channels()` (see analysis/preprocess_subjects.py).
-        # Every stage below inherits whatever gets excluded here.
+        # `e.make_bad_channels()`, which the preprocess_all_subjects()
+        # method below calls for you. Every stage below inherits
+        # whatever gets excluded here.
         'raw': RawSource(
             'eeg/{subject}_task-{recording}_eeg.bdf',
             reader=mne.io.read_raw_bdf,
@@ -193,11 +206,12 @@ class BinauralCocktail(TRFExperiment):
         # components get marked as artifacts (mainly eye blinks).
         #
         # The fitting and the human component selection both happen by
-        # running `e.make_ica_selection()` (see
-        # analysis/preprocess_subjects.py) - the first time it's run
-        # for a subject, this line's RawICA(...) is what actually gets
-        # fit; the selection you make is then cached and reused
-        # automatically by every later request for the 'ica' stage.
+        # running `e.make_ica_selection()`, which
+        # preprocess_all_subjects() below also calls for you - the
+        # first time it runs for a subject, this line's RawICA(...) is
+        # what actually gets fit; the selection you make is then
+        # cached and reused automatically by every later request for
+        # the 'ica' stage.
         'ica': RawICA('0.5-20-mast', 'cocktail', cache=True, fit_kwargs=dict(decim=16)),
         # STEP 5 - a wider filter band, for analyses that need more
         # than 0.5-20 Hz.
@@ -215,6 +229,37 @@ class BinauralCocktail(TRFExperiment):
         # the predictive power of the averaged "mixture" predictor.
         'mix-av': SubGroup('all', 'sub-13'),
     }
+
+    def preprocess_all_subjects(self, skip=()):
+        """Run the interactive part of steps 1 and 4 of `raw`, for every subject.
+
+        `raw` above only describes *how* to compute each stage; steps 1
+        and 4 also need a human to look at a plot and click (marking
+        bad channels, then picking which ICA components are artifacts).
+        This method is what actually walks through every subject and
+        asks for that input, one subject at a time.
+
+        Both make_bad_channels() and make_ica_selection() open a plot
+        and pause until you close it, so this loop advances to the
+        next subject automatically the moment you're done with the
+        current one - there's nothing else to run or edit by hand.
+
+        Results are cached per subject (see steps 1 and 4 above), so a
+        subject that's already done is never reprocessed. Pass
+        `skip=['sub-01', ...]` to explicitly resume partway through.
+        """
+        subjects = [f'sub-{i:02d}' for i in range(1, 14)]  # sub-01 .. sub-13
+
+        for subject in subjects:
+            if subject in skip:
+                continue
+
+            print(f"\n=== {subject} ===")
+            self.set(subject=subject)
+            self.make_bad_channels()
+            self.make_ica_selection(epoch='clean', decim=16)
+
+        print("\nDone. Every subject has bad channels marked and ICA fit.")
 
     def fix_events(self, ds):
         # Trigger codes 1 and 2 mark the start of a story; anything else
@@ -270,3 +315,11 @@ class BinauralCocktail(TRFExperiment):
 # Creating the pipeline instance here means other scripts can just do
 # `from experiment import e` instead of repeating this setup.
 e = BinauralCocktail(DATA_ROOT)
+
+# This only runs when this file is executed directly
+# (`python analysis/experiment.py`), never when it's imported
+# (`from experiment import e`, what analysis/cortical_analysis.ipynb
+# does) - so importing this file is always safe and never launches the
+# interactive preprocessing by accident.
+if __name__ == '__main__':
+    e.preprocess_all_subjects()

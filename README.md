@@ -70,26 +70,26 @@ conda activate cocktail-cortical
    (already saved in `experiment.py`; only needed if the stimuli change).
 3. **`predictors/gammatone_predictors.py`** - builds the cortical speech predictors
    (envelope and onset gammatone spectrograms) from the stimulus audio.
-4. **`analysis/preprocess_subjects.py`** - mark bad channels and fit ICA
-   for every subject, one after another. The actual bad-channel and
-   component picks are interactive (you look at a plot and click), but
-   moving between subjects isn't: `make_bad_channels()` and
-   `make_ica_selection()` each open a plot and pause the script until
-   you close it, so the loop advances to the next subject the moment
-   you close the current plot - nothing to edit or re-run by hand.
-   Results are cached to disk per subject, so this never redoes a
-   subject that's already done. Run with
-   `python analysis/preprocess_subjects.py`.
-5. **`analysis/experiment.py`** - not run directly; it defines the
-   eelbrain pipeline (preprocessing, epochs, predictors) that the
-   analysis notebook imports.
-6. **`analysis/cortical_analysis.ipynb`** - the actual analysis: envelope
+4. **`analysis/experiment.py`** - defines the eelbrain pipeline
+   (preprocessing, epochs, predictors) that the analysis notebook
+   imports, *and* is what you run to mark bad channels and fit ICA for
+   every subject: `python analysis/experiment.py`. That loops over
+   every subject automatically (see `preprocess_all_subjects()` in the
+   file) - `make_bad_channels()` and `make_ica_selection()` each open a
+   plot and pause until you close it, so the loop advances to the next
+   subject the moment you're done with the current one, nothing to
+   edit or re-run by hand. Results are cached to disk per subject, so
+   this never redoes a subject that's already done. Importing this
+   file elsewhere (`from experiment import e`, what the analysis
+   notebook does) never triggers this - it only runs when the file is
+   executed directly.
+5. **`analysis/cortical_analysis.ipynb`** - the actual analysis: envelope
    model checks, the dichotic ear-of-presentation comparison, the
    binaural-cue comparison, and TRF/peak-time plots. Open it directly
    in Jupyter and run the cells top to bottom.
 
-Exact eelbrain method names in `preprocess_subjects.py` can vary
-slightly by version; see
+Exact eelbrain method names in `experiment.py`'s
+`preprocess_all_subjects()` can vary slightly by version; see
 https://eelbrain.readthedocs.io/en/stable/experiment.html for the
 current API. `analysis/cortical_analysis.ipynb` is a real Jupyter
 notebook file, committed as-is (clear its cell outputs before
