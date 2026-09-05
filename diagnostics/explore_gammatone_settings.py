@@ -18,7 +18,7 @@
 #
 # This is a scratch notebook for visually comparing gammatone spectrogram
 # settings (frequency range, number of bands) before committing to the
-# ones used in predictors/gammatone.py. It doesn't save anything - it's
+# ones used in predictors/gammatone_predictors.py. It doesn't save anything - it's
 # just for looking at the output.
 
 # %%
@@ -47,7 +47,7 @@ STIMULUS_DIR = DATA_ROOT / 'stimuli'
 #
 # The first 10 seconds of one male and one female stimulus, using an
 # 80-15000 Hz range (the full audible range) versus 80-8000 Hz (the
-# range predictors/gammatone.py actually uses, since most speech energy
+# range predictors/gammatone_predictors.py actually uses, since most speech energy
 # falls below 8000 Hz).
 
 # %%

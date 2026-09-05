@@ -8,7 +8,7 @@ turns the "eeg/s1/s1_cocktail.bdf, eeg/s2/s2_cocktail.bdf, ..." files
 into a "bids/sub-01/eeg/..., bids/sub-02/eeg/..." structure that the
 rest of the pipeline (and any other BIDS-aware tool) can read.
 
-Run this first, before predictors/gammatone.py or analysis/experiment.py.
+Run this first, before predictors/gammatone_predictors.py or analysis/experiment.py.
 
 This only converts the raw recordings. Bad-channel marking and ICA
 fitting happen afterwards, interactively, through eelbrain itself (see

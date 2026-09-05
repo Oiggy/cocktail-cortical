@@ -36,7 +36,7 @@ you've cloned the repo:
       bids/          created by data/bids_extraction.py
       stimuli/       the stimulus .wav files (male_1..12, female_1..12,
                      List_1_stim_1..12, List_2_stim_1..12)
-      predictors/    created by predictors/gammatone.py
+      predictors/    created by predictors/gammatone_predictors.py
 ```
 
 Every script works this location out on its own, from its own file
@@ -44,7 +44,7 @@ location (`REPO_ROOT.parent / "dataset" / "cocktail"`), so no path
 needs editing and nothing here depends on your username or which
 folder you cloned the repo into. If you'd rather put the dataset
 somewhere else entirely, edit `DATA_ROOT` in `data/bids_extraction.py`,
-`predictors/gammatone.py`, `predictors/duration.py`,
+`predictors/gammatone_predictors.py`, `predictors/duration.py`,
 `diagnostics/explore_gammatone_settings.py`, `diagnostics/check_montage.py`,
 and `analysis/experiment.py`.
 
@@ -68,7 +68,7 @@ conda activate cocktail-cortical
    into the standard BIDS folder layout under `bids/`.
 2. **`predictors/duration.py`** - measures each stimulus's length
    (already saved in `experiment.py`; only needed if the stimuli change).
-3. **`predictors/gammatone.py`** - builds the cortical speech predictors
+3. **`predictors/gammatone_predictors.py`** - builds the cortical speech predictors
    (envelope and onset gammatone spectrograms) from the stimulus audio.
 4. **Preprocessing** (see below) - mark bad channels and fit ICA for
    each subject. This is interactive, done once per subject, and its
@@ -125,7 +125,7 @@ double-checking.
 - **`check_montage.py`** - confirms the electrode channel names and the
   custom montage file (`analysis/biosemi64mod.txt`) load correctly.
 - **`explore_gammatone_settings.py`** - the scratch work used to pick the
-  frequency range and band count used in `predictors/gammatone.py`.
+  frequency range and band count used in `predictors/gammatone_predictors.py`.
 
 ## A note on BIDS conversion
 
