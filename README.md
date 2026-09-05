@@ -51,12 +51,12 @@ conda activate cocktail-cortical
    model checks, the dichotic ear-of-presentation comparison, the
    binaural-cue comparison, and TRF/peak-time plots.
 
-`analysis/cortical_analysis.py` and the scripts in `dev/` are written in
-[jupytext](https://jupytext.readthedocs.io/) "percent" format, so they
-can be opened directly as Jupyter notebooks, or run top to bottom as
-plain scripts.
+`analysis/cortical_analysis.py` and the scripts in `diagnostics/` are
+written in [jupytext](https://jupytext.readthedocs.io/) "percent"
+format, so they can be opened directly as Jupyter notebooks, or run top
+to bottom as plain scripts.
 
-## `dev/` - one-off diagnostic scripts
+## `diagnostics/` - one-off diagnostic scripts
 
 Not part of the pipeline; kept for reference when something needs
 double-checking.
