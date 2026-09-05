@@ -20,9 +20,13 @@ from pathlib import Path
 import mne
 from mne_bids import BIDSPath, write_raw_bids
 
-# Where the original .bdf files live (one subfolder per subject, e.g.
-# eeg/s1/s1_cocktail.bdf), and where the BIDS copy should go.
-DATA_ROOT = Path("/Users/joshuaighalo/Github Repositories/dataset/cocktail")
+# The dataset lives outside this repo, in a sibling "dataset/cocktail"
+# folder next to it (not inside it, since data shouldn't go into git).
+# Working this out from this file's own location means the scripts run
+# the same way no matter whose computer, or which folder, the repo is
+# cloned into.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_ROOT = REPO_ROOT.parent / "dataset" / "cocktail"
 RAW_DATA_DIR = DATA_ROOT / "eeg"
 BIDS_ROOT = DATA_ROOT / "bids"
 

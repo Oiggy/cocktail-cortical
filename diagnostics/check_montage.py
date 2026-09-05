@@ -27,11 +27,27 @@
 # Update RAW_FILE below to point at any one subject's raw recording.
 
 # %%
+from pathlib import Path
+
 import mne
 
+# The dataset lives outside this repo, in a sibling "dataset/cocktail"
+# folder next to it. Working this out from this file's own location
+# means the script runs the same way no matter whose computer, or which
+# folder, the repo is cloned into.
+try:
+    REPO_ROOT = Path(__file__).resolve().parent.parent
+except NameError:
+    # __file__ isn't defined when a cell is run interactively in a
+    # Jupyter kernel; fall back to assuming Jupyter's working directory
+    # is this file's own folder.
+    REPO_ROOT = Path.cwd().parent
+DATA_ROOT = REPO_ROOT.parent / "dataset" / "cocktail"
 
-RAW_FILE = '/Users/joshuaighalo/Github Repositories/dataset/cocktail/bids/sub-03/eeg/sub-03_task-cocktail_eeg.vhdr'
-MONTAGE_FILE = '../analysis/biosemi64mod.txt'
+# Update the subject number below to point at any one subject's raw
+# recording.
+RAW_FILE = DATA_ROOT / 'bids' / 'sub-03' / 'eeg' / 'sub-03_task-cocktail_eeg.vhdr'
+MONTAGE_FILE = REPO_ROOT / 'analysis' / 'biosemi64mod.txt'
 
 raw = mne.io.read_raw_brainvision(RAW_FILE)
 

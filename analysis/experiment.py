@@ -1,30 +1,61 @@
 """
-Defines the eelbrain 0.43 pipeline for the cortical TRF analysis.
+What this file is for
+----------------------
+- This file does not analyze anything by itself. It's the setup/config
+  file for the whole project.
+- It tells eelbrain everything it needs to know about this dataset once,
+  in one place: where the recordings are, how to clean them up, what
+  the trigger codes mean, which stimulus goes with which EEG segment,
+  and so on.
+- Every other script then just says "from experiment import e" and asks
+  that object for what it needs (e.g. "give me the cleaned EEG for the
+  diotic condition"), instead of repeating all of this setup itself.
+- You should never need to run this file directly. Other scripts import
+  it, and running data/bids_extraction.py plus predictors/gammatone.py
+  first is what actually creates the files this setup points to.
 
-This file doesn't run an analysis by itself - it describes the data (where
-the recordings are, how to preprocess them, what the trigger codes mean)
-so that other scripts can just ask for what they need (e.g. "give me the
-cleaned EEG for the 'diotic' condition") without repeating that setup
-every time.
-
-Other scripts use it like this:
-
-    from experiment import e
-
-Run data/bids_extraction.py and predictors/gammatone.py before using this,
-since this file expects both the BIDS-formatted recordings and the
-gammatone predictors to already exist on disk.
+How this file is organized, top to bottom
+------------------------------------------
+- DATA_ROOT: the one folder everything else in this file is found
+  relative to.
+- SEGMENT_DURATION: how long (in seconds) each audio stimulus is, so
+  eelbrain knows how much EEG to cut out for each one.
+- CH_MAP: renames the EEG cap's numbered electrodes (A1, A2, ...) to
+  their standard names (Fp1, AF7, ...) that other software recognizes.
+- MONTAGE: the physical 3D position of each electrode, needed to draw
+  scalp maps.
+- SPEAKER / SPATIAL / SIDE: describe the experiment design itself, i.e.
+  which speaker, which listening condition, and which ear applied to
+  each of the 12 segments a subject heard.
+- The BinauralCocktail class: the actual pipeline definition. Inside it:
+    - raw: the cleanup steps applied to the EEG, in order (filtering,
+      re-referencing, removing eye-blink artifacts with ICA).
+    - groups: a named shortcut for referring to a subset of subjects.
+    - fix_events / label_events: how to figure out, from the trigger
+      codes in the recording, which condition and which stimulus each
+      segment was.
+    - epochs: which time windows of EEG to extract, and how to split
+      them up by condition (clean / diotic / binaural / dichotic).
+    - predictors: which generated predictor files (from
+      predictors/gammatone.py) are available to use in the analysis.
+- The last line, "e = BinauralCocktail(DATA_ROOT)", creates the one
+  ready-to-use object that every other script imports.
 """
 from eelbrain import Factor, Var
 from eelbrain.pipeline import *
 from trftools.pipeline import *
 import mne
+from pathlib import Path
 
-# Root folder for the whole project. It should contain:
+# The dataset lives outside this repo, in a sibling "dataset/cocktail"
+# folder next to it. Working this out from this file's own location
+# means the pipeline works the same way no matter whose computer, or
+# which folder, the repo is cloned into. It should contain:
 #   bids/        the BIDS-formatted EEG recordings (data/bids_extraction.py)
 #   stimuli/     the stimulus .wav files
 #   predictors/  the generated predictor files (predictors/gammatone.py)
-DATA_ROOT = "/Users/joshuaighalo/Github Repositories/dataset/cocktail"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_ROOT = str(REPO_ROOT.parent / "dataset" / "cocktail")
 
 # Each audio stimulus has a different length. This tells the pipeline how
 # long to make the EEG segment ("epoch") for each one.

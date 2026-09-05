@@ -19,10 +19,11 @@ cortical responses track the slower speech envelope).
 This repo analyzes the Binaural Cocktail EEG dataset: subjects listening
 to interleaved male and female speakers under four spatial conditions.
 
-Data lives outside this repo, as a sibling folder next to it:
+Data lives outside this repo, as a sibling folder next to it, wherever
+you've cloned the repo:
 
 ```
-Github Repositories/
+<parent folder>/
   cocktail-cortical/                 this repo
   dataset/
     cocktail/
@@ -36,12 +37,14 @@ Github Repositories/
       predictors/    created by predictors/gammatone.py
 ```
 
-All the data paths in the scripts (`DATA_ROOT` in
-`data/bids_extraction.py`, `predictors/gammatone.py`,
-`predictors/duration.py`, `diagnostics/explore_gammatone_settings.py`,
-and `analysis/experiment.py`) point directly at
-`/Users/joshuaighalo/Github Repositories/dataset/cocktail`. If you move
-the dataset elsewhere, update `DATA_ROOT` in each of those files.
+Every script works this location out on its own, from its own file
+location (`REPO_ROOT.parent / "dataset" / "cocktail"`), so no path
+needs editing and nothing here depends on your username or which
+folder you cloned the repo into. If you'd rather put the dataset
+somewhere else entirely, edit `DATA_ROOT` in `data/bids_extraction.py`,
+`predictors/gammatone.py`, `predictors/duration.py`,
+`diagnostics/explore_gammatone_settings.py`, `diagnostics/check_montage.py`,
+and `analysis/experiment.py`.
 
 Your `eeg/sX/` folders may already contain a `-bad_channels.txt` and an
 `ica-ica.fif` from earlier work on this data - those were generated

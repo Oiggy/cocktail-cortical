@@ -24,10 +24,12 @@ from pathlib import Path
 
 from eelbrain import *
 
-# Where the stimulus audio lives, and where to save the generated
-# predictors. These sit next to (not inside) the BIDS folder, since BIDS
-# is only for the EEG recordings themselves.
-DATA_ROOT = Path("/Users/joshuaighalo/Github Repositories/dataset/cocktail")
+# The dataset lives outside this repo, in a sibling "dataset/cocktail"
+# folder next to it. Working this out from this file's own location
+# means the script runs the same way no matter whose computer, or which
+# folder, the repo is cloned into.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_ROOT = REPO_ROOT.parent / "dataset" / "cocktail"
 STIMULUS_DIR = DATA_ROOT / "stimuli"
 PREDICTOR_DIR = DATA_ROOT / "predictors"
 

@@ -31,7 +31,18 @@ from pathlib import Path
 from eelbrain import load
 
 
-DATA_ROOT = Path("/Users/joshuaighalo/Github Repositories/dataset/cocktail")
+# The dataset lives outside this repo, in a sibling "dataset/cocktail"
+# folder next to it. Working this out from this file's own location
+# means the script runs the same way no matter whose computer, or which
+# folder, the repo is cloned into.
+try:
+    REPO_ROOT = Path(__file__).resolve().parent.parent
+except NameError:
+    # __file__ isn't defined when a cell is run interactively in a
+    # Jupyter kernel; fall back to assuming Jupyter's working directory
+    # is this file's own folder.
+    REPO_ROOT = Path.cwd().parent
+DATA_ROOT = REPO_ROOT.parent / "dataset" / "cocktail"
 STIMULUS_DIR = DATA_ROOT / 'stimuli'
 
 # %%
