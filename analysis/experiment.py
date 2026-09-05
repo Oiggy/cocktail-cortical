@@ -155,12 +155,23 @@ class BinauralCocktail(TRFExperiment):
     sessions = ['cocktail']
 
     # The preprocessing steps applied to the raw EEG, each one building on
-    # the previous. For details see
+    # the previous. This dict only describes *how* to compute each stage -
+    # two of the stages below (1 and 4) also need a human to look at a
+    # plot and click, which happens by running
+    # analysis/preprocess_subjects.py, not by anything written here. For
+    # full details on the raw-processing pipeline see
     # https://eelbrain.readthedocs.io/en/stable/experiment.html
     raw = {
-        # The raw BIDS recording. mne-bids keeps BioSemi recordings in
-        # their original .bdf format rather than converting them, so
+        # STEP 1 - load the recording. mne-bids keeps BioSemi recordings
+        # in their original .bdf format rather than converting them, so
         # this reads the same way the original .bdf files did.
+        #
+        # Bad channels are excluded right here, automatically, the
+        # moment this stage loads - not because this dict says so, but
+        # because RawSource always checks for a per-subject
+        # bad-channels file first. That file is created by running
+        # `e.make_bad_channels()` (see analysis/preprocess_subjects.py).
+        # Every stage below inherits whatever gets excluded here.
         'raw': RawSource(
             'eeg/{subject}_task-{recording}_eeg.bdf',
             reader=mne.io.read_raw_bdf,
@@ -170,19 +181,32 @@ class BinauralCocktail(TRFExperiment):
             rename_channels=CH_MAP,
             montage=MONTAGE,
         ),
-        # Band-pass filter for the cortical analysis: cortical responses
-        # to speech are slow, so a 0.5-20 Hz filter keeps the signal of
-        # interest while removing slow drift and high-frequency noise.
+        # STEP 2 - band-pass filter for the cortical analysis: cortical
+        # responses to speech are slow, so a 0.5-20 Hz filter keeps the
+        # signal of interest while removing slow drift and
+        # high-frequency noise.
         '0.5-20': RawFilter('raw', 0.5, 20, cache=False),
-        # Re-reference to the two mastoid electrodes (a standard EEG
-        # reference choice).
+        # STEP 3 - re-reference to the two mastoid electrodes (a
+        # standard EEG reference choice).
         '0.5-20-mast': RawReReference('0.5-20', ['A1', 'A2']),
-        # ICA finds and removes artifact components (mainly eye blinks).
+        # STEP 4 - fit ICA on step 3's output, and remove whichever
+        # components get marked as artifacts (mainly eye blinks).
+        #
+        # The fitting and the human component selection both happen by
+        # running `e.make_ica_selection()` (see
+        # analysis/preprocess_subjects.py) - the first time it's run
+        # for a subject, this line's RawICA(...) is what actually gets
+        # fit; the selection you make is then cached and reused
+        # automatically by every later request for the 'ica' stage.
         'ica': RawICA('0.5-20-mast', 'cocktail', cache=True, fit_kwargs=dict(decim=16)),
-        # A wider filter, with the same ICA solution applied - useful for
-        # analyses that need a broader frequency range than 0.5-20 Hz.
+        # STEP 5 - a wider filter band, for analyses that need more
+        # than 0.5-20 Hz.
         '1-40': RawFilter('raw', 1, 40, cache=False),
+        # STEP 6 - re-reference this wider band the same way as step 3.
         '1-40-mast': RawReReference('1-40', ['A1', 'A2']),
+        # STEP 7 - apply the same ICA solution from step 4 to this
+        # wider band, reusing the same component selection without
+        # redoing it.
         '1-40-ica': RawApplyICA('1-40-mast', 'ica', cache=True),
     }
 
