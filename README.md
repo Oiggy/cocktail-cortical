@@ -1,9 +1,9 @@
 # Cocktail Cortical
 
 Cortical TRF (temporal response function) analysis of the Binaural
-Cocktail EEG dataset, built on eelbrain 0.41.2 (the latest version
-actually released; eelbrain never had a 0.43 release, on conda-forge
-or PyPI - the highest version either has is 0.41.2).
+Cocktail EEG dataset, built on eelbrain's in-development BIDS support
+(its `Pipeline` class - see the Setup section below for why this
+requires a special install, and why `trftools` isn't used).
 
 This repo answers a specific question: how well does the cortical (slow,
 speech-envelope-tracking) EEG response reflect the foreground story a
@@ -36,7 +36,7 @@ you've cloned the repo:
       bids/          created by data/bids_extraction.py
         derivatives/
           predictors/  created by predictors/gammatone_predictors.py
-                       (TRFExperiment looks for predictors here, not
+                       (UTSPredictor looks for predictors here, not
                        directly under bids/)
       stimuli/       the stimulus .wav files (male_1..12, female_1..12,
                      List_1_stim_1..12, List_2_stim_1..12)
@@ -63,20 +63,18 @@ that step under the new BIDS layout.
 ```
 conda env create -f environment.yml
 conda activate cocktail-cortical
-pip install --no-deps https://github.com/christianbrodbeck/TRF-Tools/archive/refs/heads/main.zip
-pip install textgrid filelock appdirs gammatone
 ```
 
-Why two separate pip commands instead of listing everything in
-`environment.yml`: `trftools`'s own setup.py requires `eelbrain
->=0.41`, but pip reads the dev-alpha eelbrain conda just installed as
-version `"0.0.0"` (a metadata quirk of its pre-release build), decides
-that fails the check, and "fixes" it by downloading and installing the
-real eelbrain 0.41.2 from PyPI right over it - undoing everything
-above and bringing back the `Pipeline` import error. `--no-deps` stops
-that; the second command installs the few things `trftools` actually
-needs (`textgrid`, `filelock`, `appdirs`) plus `gammatone` (needed by
-`predictors/gammatone_predictors.py`) without touching eelbrain.
+This project uses eelbrain's own `Pipeline` class directly (its
+in-development BIDS support), not the `trftools` package. `trftools`'s
+published code hasn't been updated to match this eelbrain rewrite yet
+(it imports several eelbrain internals that no longer exist, so it
+can't currently be imported against this eelbrain version at all) -
+and it turns out it isn't needed anyway: this eelbrain version already
+has TRF fitting, `UTSPredictor`, `load_model_test`, and everything else
+this project uses built in natively. This setup was verified against
+the original author's own reference implementation for this dataset:
+https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
 
 ## Pipeline (run in this order)
 

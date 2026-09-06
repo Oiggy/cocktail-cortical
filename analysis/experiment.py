@@ -18,6 +18,15 @@ What this file is for
   call it yourself, but you can (`e.preprocess_all_subjects()`, from
   any Python session) if you ever want to do that step on its own.
 
+This uses eelbrain's own `Pipeline` class directly (its in-development
+BIDS support), not the `trftools` package. `trftools`'s published code
+hasn't been updated to match this eelbrain rewrite yet, so it can't
+currently be imported against it at all - and it turns out it isn't
+needed anyway, this eelbrain version already has TRF fitting,
+UTSPredictor, and everything else this project uses built in natively.
+Verified against the original author's own reference implementation
+for this dataset: https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
+
 What runs, top to bottom, the moment this file is imported
 ------------------------------------------------------------
 - Work out DATA_ROOT: the one folder everything else below is found in.
@@ -57,7 +66,6 @@ What runs, top to bottom, the moment this file is imported
 """
 from eelbrain import Factor, Var
 from eelbrain.pipeline import *
-from trftools.pipeline import *
 import mne
 from pathlib import Path
 
@@ -70,7 +78,7 @@ from pathlib import Path
 #   stimuli/                       the stimulus .wav files
 #   bids/derivatives/predictors/   the generated predictor files
 #                                  (predictors/gammatone_predictors.py) -
-#                                  TRFExperiment looks for these here,
+#                                  UTSPredictor looks for these here,
 #                                  not directly under bids/
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = str(REPO_ROOT.parent / "dataset" / "cocktail")
@@ -156,17 +164,7 @@ SIDE = ((
 ))
 
 
-class BinauralCocktail(TRFExperiment):
-
-    auto_delete_cache = 'ask'
-
-    # Recordings live under <DATA_ROOT>/bids, in BIDS format.
-    data_dir = 'bids'
-    # BIDS subject folders are named "sub-03", "sub-04", etc.
-    subject_re = r'sub-\d+'
-    # BIDS task name used when the recordings were extracted
-    # (see data/bids_extraction.py's TASK_NAME).
-    sessions = ['cocktail']
+class BinauralCocktail(Pipeline):
 
     # The preprocessing steps applied to the raw EEG, each one building on
     # the previous. This dict only describes *how* to compute each stage -
@@ -176,9 +174,10 @@ class BinauralCocktail(TRFExperiment):
     # details on the raw-processing pipeline see
     # https://eelbrain.readthedocs.io/en/stable/experiment.html
     raw = {
-        # STEP 1 - load the recording. mne-bids keeps BioSemi recordings
-        # in their original .bdf format rather than converting them, so
-        # this reads the same way the original .bdf files did.
+        # STEP 1 - load the recording. Pipeline finds each subject's raw
+        # file automatically from the BIDS dataset (whatever format it's
+        # in), so unlike a plain filename, nothing needs to be specified
+        # here beyond how to prepare the channels.
         #
         # Bad channels are excluded right here, automatically, the
         # moment this stage loads - not because this dict says so, but
@@ -188,10 +187,6 @@ class BinauralCocktail(TRFExperiment):
         # method below calls for you. Every stage below inherits
         # whatever gets excluded here.
         'raw': RawSource(
-            'eeg/{subject}_task-{recording}_eeg.bdf',
-            reader=mne.io.read_raw_bdf,
-            eog=['EXG1', 'EXG2', 'EXG3', 'EXG4'],
-            misc=['EXG7', 'EXG8', 'GSR1', 'GSR2', 'Erg1', 'Erg2', 'Resp', 'Plet', 'Temp'],
             adjacency='auto',
             rename_channels=CH_MAP,
             montage=MONTAGE,
@@ -214,7 +209,7 @@ class BinauralCocktail(TRFExperiment):
         # what actually gets fit; the selection you make is then
         # cached and reused automatically by every later request for
         # the 'ica' stage.
-        'ica': RawICA('0.5-20-mast', 'cocktail', cache=True, fit_kwargs=dict(decim=16)),
+        'ica': RawICA('0.5-20-mast', fit_kwargs=dict(decim=16)),
         # STEP 5 - a wider filter band, for analyses that need more
         # than 0.5-20 Hz.
         '1-40': RawFilter('raw', 1, 40, cache=False),
@@ -224,6 +219,17 @@ class BinauralCocktail(TRFExperiment):
         # wider band, reusing the same component selection without
         # redoing it.
         '1-40-ica': RawApplyICA('1-40-mast', 'ica', cache=True),
+    }
+
+    # TRF-fitting settings for the boosting algorithm. These used to be
+    # passed directly as loose keyword arguments to load_trfs()/
+    # load_model_test() (see analysis/cortical_analysis.ipynb's
+    # PARAMETERS); they now belong here instead. `basis` and `error`
+    # match Boosting's own defaults - listed explicitly so they're easy
+    # to find and change - while `partitions` and `selective_stopping`
+    # override the defaults.
+    estimators = {
+        'boosting': Boosting(basis=0.050, error='l1', partitions=-4, selective_stopping=1),
     }
 
     def preprocess_all_subjects(self, skip=()):
@@ -302,9 +308,13 @@ class BinauralCocktail(TRFExperiment):
     stim_var = 'fg'
 
     # The predictors available to the TRF models, generated by
-    # predictors/gammatone_predictors.py.
+    # predictors/gammatone_predictors.py. UTSPredictor is eelbrain's
+    # built-in predictor type for a continuous time-series file per
+    # stimulus (envelope, onsets, etc.); resample='bin' matches how
+    # gammatone_predictors.py saved these (at their own native rate,
+    # to be averaged down to whatever rate an analysis asks for).
     predictors = {
-        'gammatone': FilePredictor(resample='bin'),
+        'gammatone': UTSPredictor(resample='bin'),
     }
 
 

@@ -1,19 +1,20 @@
-# This environment matches the one the trftools maintainer publishes
-# for exactly this setup (BIDS + eelbrain's Pipeline + TRFExperiment):
-# https://github.com/christianbrodbeck/TRF-Tools/blob/main/env-trf.yml
+# eelbrain's own in-development BIDS support (its `Pipeline` class) has
+# absorbed everything this project needs natively - TRF fitting,
+# UTSPredictor, load_model_test, make_bad_channels, make_ica_selection.
+# trftools is NOT used or needed: its published `main` branch hasn't
+# been updated to match this rewrite (it still imports several eelbrain
+# internals that no longer exist), so it can't currently be imported at
+# all against this eelbrain version. Verified directly against the
+# original author's own reference implementation for this dataset:
+# https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
 #
-# Why the extra channel: TRFExperiment (used in analysis/experiment.py)
-# needs eelbrain's `Pipeline` class, which only exists in eelbrain's
-# in-development BIDS support - not yet in a stable release. That
-# in-development version is only published on this "eelbrain_dev"
-# label, not on the regular conda-forge channel or PyPI (where the
-# newest version is still 0.41.2, without `Pipeline`). This is also
-# why no Python version is pinned below: the dev builds require
-# Python 3.12 or 3.13, so letting conda pick avoids a conflict.
-#
-# trftools and its dependencies are deliberately NOT listed here as a
-# pip section - see the setup instructions in README.md for why, and
-# run those two pip commands after this environment is created.
+# Why the extra channel: eelbrain's `Pipeline` class only exists in this
+# in-development BIDS support, not yet in a stable release. It's only
+# published on this "eelbrain_dev" label, not on the regular conda-forge
+# channel or PyPI (where the newest version is still 0.41.2, without
+# `Pipeline`). This is also why no Python version is pinned below: the
+# dev builds require Python 3.12 or 3.13, so letting conda pick avoids
+# a conflict.
 name: cocktail-cortical
 channels:
   - conda-forge
@@ -26,3 +27,8 @@ dependencies:
   - ipywidgets
   - jupytext
   - seaborn
+  - pip:
+      # eelbrain's gammatone_bank() needs this at runtime; it's an
+      # optional dependency eelbrain doesn't install for you, and it
+      # isn't on conda-forge either.
+      - gammatone
