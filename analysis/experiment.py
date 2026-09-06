@@ -243,7 +243,7 @@ class BinauralCocktail(Pipeline):
 
     def preprocess_all_subjects(
             self, skip=(),
-            auto_bad_channels_r=False, manual_bad_channels=True,
+            auto_bad_channels_r=False, manual_bad_channels=True, redo_bad_channels=False,
             auto_ica_confidence=False, manual_ica=True, auto_ica_reject_labels=ICA_ARTIFACT_LABELS,
     ):
         """Run the interactive part of steps 1 and 4 of `raw`, for every subject.
@@ -276,6 +276,26 @@ class BinauralCocktail(Pipeline):
             computation behind the GUI's "Neighbor corr" scalp maps -
             and marks any channel below this threshold as bad, with no
             window to close.
+
+            This check is relative, not absolute: it repeatedly removes
+            whichever channel currently correlates worst with its
+            neighbors, then re-checks what's left, until nothing remains
+            below the threshold. That means the result depends on the
+            starting point - if some channels are already marked bad
+            from an earlier run, this starts from that smaller set
+            instead of the full one, and excluding channels shifts
+            everyone else's neighbor correlation. Run repeatedly without
+            resetting first, this can keep finding "new" bad channels
+            indefinitely, compounding rather than converging. See
+            redo_bad_channels below to avoid that.
+        redo_bad_channels
+            Only relevant when manual_bad_channels is False. False
+            (default): add any newly-found bad channels to whatever this
+            subject already has marked (unchanged from before). True:
+            clear this subject's previously auto-found bad channels
+            first, so the check starts fresh from the full channel set
+            every time - the same starting point gives the same result
+            every time, instead of drifting further with each re-run.
         manual_ica
             True (default): pick ICA artifact components by hand, in
             the GUI.
@@ -302,6 +322,9 @@ class BinauralCocktail(Pipeline):
             e.preprocess_all_subjects(manual_ica=False, auto_ica_confidence=0.75)          # bad channels by hand, ICA automatic
             e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3,
                                        manual_ica=False, auto_ica_confidence=0.75)          # both automatic
+        Re-running the automatic bad-channel check from a clean slate
+        instead of adding to a previous run:
+            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3, redo_bad_channels=True)
         """
         if not manual_bad_channels and auto_bad_channels_r is False:
             raise ValueError(
@@ -338,6 +361,12 @@ class BinauralCocktail(Pipeline):
                 # looked at the window.
                 gui.run()
             else:
+                if redo_bad_channels:
+                    # bad_chs=(), redo=True: reset this subject to no bad
+                    # channels first, so the check below starts from the
+                    # full channel set instead of building on whatever an
+                    # earlier run already excluded.
+                    self.make_bad_channels([], redo=True)
                 _, bad_channels = self.make_bad_channels_neighbor_correlation(
                     auto_bad_channels_r, epoch='clean',
                 )

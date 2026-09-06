@@ -118,6 +118,17 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    argument out (or explicitly pass `manual_bad_channels=True`) to keep
    doing bad channels by hand.
 
+   This check is relative to whichever channels are already excluded,
+   not an absolute one-shot measurement: it repeatedly removes whichever
+   channel currently correlates worst with its neighbors, then re-checks
+   what's left. That means re-running it on a subject that already has
+   automatically-found bad channels starts from that smaller set, not
+   the full one, and can keep finding "new" bad channels indefinitely
+   instead of converging on the same result. Pass `redo_bad_channels=True`
+   to clear a subject's previous automatic result first and start fresh
+   from the full channel set instead - the same starting point gives the
+   same result every time.
+
    ICA component selection can be automated the same way:
    `e.preprocess_all_subjects(manual_ica=False, auto_ica_confidence=0.75)`.
    This runs [mne-icalabel](https://github.com/mne-tools/mne-icalabel)'s
