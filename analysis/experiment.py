@@ -407,17 +407,20 @@ class BinauralCocktail(Pipeline):
         # preload=False + tstart/tstop crops the *lazy* file window before
         # anything is actually read into memory - load_raw() only calls
         # load_data() itself when samplingrate or preload is requested, so
-        # with preload=False here, cropping happens first and the
-        # subsequent filter() below (which preloads on its own) then only
-        # ever reads that cropped window. preload=True here instead would
-        # load the full continuous recording - at its native ~4096 Hz - in
-        # full before cropping, which is large enough to exhaust memory
-        # outright (this crashed the Jupyter kernel entirely). A few
-        # minutes is already enough data for stable topography/spectrum
-        # features, so there's no need for more.
+        # with preload=False here, cropping happens first; load_data()
+        # below then only ever reads that already-cropped window.
+        # preload=True here instead would load the full continuous
+        # recording - at its native ~4096 Hz - in full before cropping,
+        # which is large enough to exhaust memory outright (this crashed
+        # the Jupyter kernel entirely). A few minutes is already enough
+        # data for stable topography/spectrum features, so there's no
+        # need for more.
         raw = self.load_raw(preload=False, raw='raw', tstart=0, tstop=300)
         raw_for_iclabel = raw.copy()
         raw_for_iclabel.pick(ica.ch_names)
+        # filter() needs the data loaded first - unlike some other MNE
+        # methods, it does not preload on its own and raises instead.
+        raw_for_iclabel.load_data(verbose=False)
         raw_for_iclabel.filter(1., 100., verbose=False)
         raw_for_iclabel.set_eeg_reference('average', verbose=False)
 
