@@ -22,7 +22,12 @@ channels:
 dependencies:
   - eelbrain>=0.42.0a4
   - pip
-  - ipython
+  # eelbrain's interactive GUI (make_bad_channels_selection(),
+  # make_ica_selection()) needs IPython.core.pylabtools.backend2gui,
+  # which IPython removed in version 9. Confirmed error without this
+  # pin: "AttributeError: module 'IPython.core.pylabtools' has no
+  # attribute 'backend2gui'" the moment a GUI window tries to open.
+  - ipython<9
   - jupyter
   - ipywidgets
   - jupytext
