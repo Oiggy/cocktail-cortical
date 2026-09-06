@@ -270,11 +270,13 @@ class BinauralCocktail(Pipeline):
         auto_bad_channels_r
             Correlation threshold (e.g. 0.3) for finding bad channels
             automatically instead - only used when `manual_bad_channels`
-            is False. eelbrain's own
-            make_bad_channels_neighbor_correlation() computes each
+            is False. Uses _safe_bad_channels_neighbor_correlation()
+            below (the same algorithm as eelbrain's own
+            make_bad_channels_neighbor_correlation(), with one of its
+            bugs worked around - see that method) to compute each
             channel's correlation with its neighbors - the exact same
             computation behind the GUI's "Neighbor corr" scalp maps -
-            and marks any channel below this threshold as bad, with no
+            and mark any channel below this threshold as bad, with no
             window to close.
 
             This check is relative, not absolute: it repeatedly removes
@@ -367,7 +369,7 @@ class BinauralCocktail(Pipeline):
                     # full channel set instead of building on whatever an
                     # earlier run already excluded.
                     self.make_bad_channels([], redo=True)
-                _, bad_channels = self.make_bad_channels_neighbor_correlation(
+                _, bad_channels = self._safe_bad_channels_neighbor_correlation(
                     auto_bad_channels_r, epoch='clean',
                 )
                 print(f"  bad channels (r < {auto_bad_channels_r}): {bad_channels or 'none'}")
@@ -384,6 +386,47 @@ class BinauralCocktail(Pipeline):
                 self._auto_select_ica(auto_ica_confidence, auto_ica_reject_labels)
 
         print("\nDone. Every subject has bad channels marked and ICA fit.")
+
+    def _safe_bad_channels_neighbor_correlation(self, r, epoch=None):
+        """Same algorithm as eelbrain's own make_bad_channels_neighbor_correlation(),
+        with one real bug in that method worked around.
+
+        eelbrain's version repeatedly removes whichever channel currently
+        correlates worst with its neighbors, then recomputes correlations
+        on what's left - but if a channel's *only* neighbors happen to be
+        among the ones already removed, it has nothing left to correlate
+        against, and eelbrain's neighbor_correlation() crashes outright
+        (ValueError: Some elements do not have any neighbors) instead of
+        handling that case. This hit a real subject's data (one channel,
+        somewhere in the middle of the process, lost all its neighbors as
+        other channels around it kept getting excluded first).
+
+        This copies eelbrain's own algorithm exactly, except that when
+        that specific crash happens, it stops the loop right there instead
+        of aborting the whole subject - keeping whatever bad channels were
+        already found, and leaving the now-neighborless channel and
+        everything else untested rather than crashing.
+        """
+        from eelbrain import neighbor_correlation
+
+        data, full_nc = self.load_neighbor_correlation(1, epoch, return_data=True)
+        bad_chs = []
+        nc = full_nc
+        while nc.min() < r:
+            sensor = nc.argmin()
+            bad_chs.append(sensor)
+            new_index = nc.sensor.index(exclude=sensor)
+            data = data.sub(sensor=new_index)
+            try:
+                nc = neighbor_correlation(data)
+            except ValueError:
+                break
+            full_index = full_nc.sensor.index(exclude=bad_chs)
+            full_nc[full_index] = nc
+
+        if bad_chs:
+            self.make_bad_channels(bad_chs)
+        return full_nc, bad_chs
 
     def _auto_select_ica(self, confidence, reject_labels):
         """Classify this subject's ICA components with mne-icalabel and mark

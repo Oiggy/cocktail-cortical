@@ -111,9 +111,8 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    Bad channels can be marked automatically instead, skipping that one
    window:
    `e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3)`.
-   This uses eelbrain's own `make_bad_channels_neighbor_correlation()` -
-   the same neighbor-correlation computation behind the GUI's "Neighbor
-   corr" scalp maps - to mark any channel correlating with its
+   This uses the same neighbor-correlation computation behind the GUI's
+   "Neighbor corr" scalp maps to mark any channel correlating with its
    neighbors below `0.3` as bad, with no GUI for that step. Leave the
    argument out (or explicitly pass `manual_bad_channels=True`) to keep
    doing bad channels by hand.
@@ -128,6 +127,16 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    to clear a subject's previous automatic result first and start fresh
    from the full channel set instead - the same starting point gives the
    same result every time.
+
+   This runs as `experiment.py`'s own `_safe_bad_channels_neighbor_correlation()`
+   rather than calling eelbrain's `make_bad_channels_neighbor_correlation()`
+   directly - same algorithm, but eelbrain's own version crashes outright
+   (`ValueError: Some elements do not have any neighbors`) if a channel
+   ends up with none of its geometric neighbors left partway through
+   (this happened on real data: enough of one channel's neighbors got
+   excluded first that it had nothing left to compare against). Our
+   version stops there instead, keeping whatever was already found rather
+   than aborting the whole subject.
 
    ICA component selection can be automated the same way:
    `e.preprocess_all_subjects(manual_ica=False, auto_ica_confidence=0.75)`.
