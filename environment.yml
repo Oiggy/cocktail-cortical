@@ -37,3 +37,10 @@ dependencies:
       # optional dependency eelbrain doesn't install for you, and it
       # isn't on conda-forge either.
       - gammatone
+      # Optional automatic ICA component rejection (see
+      # auto_ica_confidence in analysis/experiment.py's
+      # preprocess_all_subjects()) - only needed if you use that
+      # instead of the interactive GUI. onnxruntime is ICLabel's
+      # lightweight neural-net backend (no GPU/PyTorch needed).
+      - mne-icalabel
+      - onnxruntime

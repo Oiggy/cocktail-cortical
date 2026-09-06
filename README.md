@@ -114,10 +114,29 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    This uses eelbrain's own `make_bad_channels_neighbor_correlation()` -
    the same neighbor-correlation computation behind the GUI's "Neighbor
    corr" scalp maps - to mark any channel correlating with its
-   neighbors below `0.3` as bad, with no GUI for that step. ICA
-   component selection still opens its own window either way; only the
-   bad-channel step changes. Leave both arguments out (or explicitly
-   pass `manual_bad_channels=True`) to keep doing bad channels by hand.
+   neighbors below `0.3` as bad, with no GUI for that step. Leave the
+   argument out (or explicitly pass `manual_bad_channels=True`) to keep
+   doing bad channels by hand.
+
+   ICA component selection can be automated the same way:
+   `e.preprocess_all_subjects(manual_ica=False, auto_ica_confidence=0.75)`.
+   This runs [mne-icalabel](https://github.com/mne-tools/mne-icalabel)'s
+   ICLabel classifier on every component and excludes any predicted as
+   eye blink / muscle artifact / heart beat / line noise / channel noise
+   with at least `0.75` confidence, with no GUI for that step. It also
+   writes, per subject, next to the other preprocessing files under
+   `bids/derivatives/mne/sub-XX/eeg/`:
+     - `sub-XX_task-cocktail_desc-iclabel_components.tsv` - one row per
+       component: its predicted label, confidence, and whether it was
+       excluded.
+     - `sub-XX_task-cocktail_desc-iclabel_components.png` - every
+       component's scalp topography in one grid image, numbered and
+       labeled the same way as the `.tsv` (excluded ones in red), so you
+       can sanity-check the automatic call by eye against the numbers.
+
+   Both bad-channel and ICA methods can be mixed freely (e.g. automatic
+   bad channels with manual ICA, or both automatic). Leave both `manual_*`
+   arguments out (the default) to do everything by hand, as before.
 
    The rest of the notebook is the actual analysis: envelope model
    checks, the dichotic ear-of-presentation comparison, the

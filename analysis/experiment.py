@@ -137,6 +137,12 @@ SEGMENT_DURATION = {
 
 MONTAGE = mne.channels.read_custom_montage('biosemi64mod.txt')
 
+# mne-icalabel's ICLabel classifier assigns each ICA component one of
+# these categories. "brain" and "other" are always kept; every other
+# category is a candidate for automatic rejection in
+# preprocess_all_subjects() below (see auto_ica_confidence there).
+ICA_ARTIFACT_LABELS = ('eye blink', 'muscle artifact', 'heart beat', 'line noise', 'channel noise')
+
 # Which speaker (male/female) was the foreground story in each of the 12
 # segments, for each of the two stimulus lists used in the experiment.
 SPEAKER = [
@@ -235,7 +241,11 @@ class BinauralCocktail(Pipeline):
         'boosting': Boosting(basis=0.050, error='l1', partitions=-4, selective_stopping=1),
     }
 
-    def preprocess_all_subjects(self, skip=(), auto_bad_channels_r=False, manual_bad_channels=True):
+    def preprocess_all_subjects(
+            self, skip=(),
+            auto_bad_channels_r=False, manual_bad_channels=True,
+            auto_ica_confidence=False, manual_ica=True, auto_ica_reject_labels=ICA_ARTIFACT_LABELS,
+    ):
         """Run the interactive part of steps 1 and 4 of `raw`, for every subject.
 
         `raw` above only describes *how* to compute each stage; steps 1
@@ -266,16 +276,42 @@ class BinauralCocktail(Pipeline):
             computation behind the GUI's "Neighbor corr" scalp maps -
             and marks any channel below this threshold as bad, with no
             window to close.
+        manual_ica
+            True (default): pick ICA artifact components by hand, in
+            the GUI.
+        auto_ica_confidence
+            Confidence threshold (e.g. 0.75) for finding artifact
+            components automatically instead - only used when
+            `manual_ica` is False. Runs mne-icalabel's ICLabel
+            classifier on each component and marks it excluded if its
+            predicted category is in `auto_ica_reject_labels` with at
+            least this much confidence. See _auto_select_ica() for
+            exactly what this computes and writes.
+        auto_ica_reject_labels
+            Which ICLabel categories count as "reject" for
+            auto_ica_confidence above. Defaults to every artifact
+            category ICA_ARTIFACT_LABELS defines near the top of this
+            file (eye blink, muscle artifact, heart beat, line noise,
+            channel noise) - "brain" and "other" are never
+            auto-rejected.
 
-        Either way, ICA component selection stays interactive - only
-        the bad-channel step changes:
-            e.preprocess_all_subjects()                                          # GUI (default)
-            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3)  # automatic
+        Four combinations, mixing and matching bad-channel and ICA
+        methods freely:
+            e.preprocess_all_subjects()                                                   # both by hand (default)
+            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3)  # bad channels automatic, ICA by hand
+            e.preprocess_all_subjects(manual_ica=False, auto_ica_confidence=0.75)          # bad channels by hand, ICA automatic
+            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3,
+                                       manual_ica=False, auto_ica_confidence=0.75)          # both automatic
         """
         if not manual_bad_channels and auto_bad_channels_r is False:
             raise ValueError(
                 "manual_bad_channels=False needs a real auto_bad_channels_r "
                 "threshold (e.g. 0.3), not the default False."
+            )
+        if not manual_ica and auto_ica_confidence is False:
+            raise ValueError(
+                "manual_ica=False needs a real auto_ica_confidence "
+                "threshold (e.g. 0.75), not the default False."
             )
 
         # Pipeline's own subject values, as found in the BIDS dataset -
@@ -306,14 +342,106 @@ class BinauralCocktail(Pipeline):
                     auto_bad_channels_r, epoch='clean',
                 )
                 print(f"  bad channels (r < {auto_bad_channels_r}): {bad_channels or 'none'}")
-            # raw='ica' points this at the 'ica' stage in `raw` above
-            # (the one built with RawICA) - without it, this defaults
-            # to whatever the current `raw` state happens to be, which
-            # may be a stage upstream of ICA and would fail.
-            self.make_ica_selection(raw='ica', epoch='clean', decim=16)
-            gui.run()
+
+            if manual_ica:
+                # raw='ica' points this at the 'ica' stage in `raw`
+                # above (the one built with RawICA) - without it, this
+                # defaults to whatever the current `raw` state happens
+                # to be, which may be a stage upstream of ICA and would
+                # fail.
+                self.make_ica_selection(raw='ica', epoch='clean', decim=16)
+                gui.run()
+            else:
+                self._auto_select_ica(auto_ica_confidence, auto_ica_reject_labels)
 
         print("\nDone. Every subject has bad channels marked and ICA fit.")
+
+    def _auto_select_ica(self, confidence, reject_labels):
+        """Classify this subject's ICA components with mne-icalabel and mark
+        artifacts excluded automatically, instead of picking them by hand in
+        the GUI (see the auto_ica_confidence parameter of
+        preprocess_all_subjects() above, which calls this).
+
+        Writes the same things a human reviewer needs to sanity-check the
+        result, saved next to this subject's other preprocessing files
+        under derivatives/mne/sub-XX/eeg/:
+          - the ICA file itself, with `.exclude` set to the rejected
+            component indices (the same file make_ica_selection() would
+            have updated by hand)
+          - sub-XX_task-cocktail_desc-iclabel_components.tsv: one row per
+            component, with its predicted label, confidence, and whether
+            it was rejected
+          - sub-XX_task-cocktail_desc-iclabel_components.png: a grid of
+            every component's scalp topography, numbered and labeled the
+            same way as the .tsv, so the two line up directly and a
+            component's number in this project always means the same
+            index in eelbrain, the .tsv, and this image.
+
+        Note: components labeled "channel noise" here can sometimes mean
+        a channel should have been marked bad but wasn't - worth a manual
+        look rather than trusting the automatic rejection blindly for
+        those specifically.
+        """
+        from mne_icalabel import label_components
+        import matplotlib.pyplot as plt
+
+        path = self.make_ica(raw='ica')
+        ica = mne.preprocessing.read_ica(path, verbose=False)
+
+        # mne-icalabel's ICLabel classifier expects data filtered 1-100 Hz
+        # and referenced to a common average (see
+        # https://mne.tools/mne-icalabel) - this project's own raw{} uses
+        # a narrower filter and a mastoid reference instead, since that's
+        # what the actual analysis needs, not what the classifier needs.
+        # So this reprocesses a throwaway *copy* of the data just for
+        # classification; nothing about the real preprocessing changes.
+        raw = self.load_raw(preload=True, raw='0.5-20-mast')
+        raw_for_iclabel = raw.copy()
+        raw_for_iclabel.filter(1., 100., verbose=False)
+        raw_for_iclabel.set_eeg_reference('average', verbose=False)
+
+        result = label_components(raw_for_iclabel, ica, method='iclabel')
+        labels, probs = result['labels'], result['y_pred_proba']
+
+        rejected = [
+            i for i, (label, prob) in enumerate(zip(labels, probs))
+            if label in reject_labels and prob >= confidence
+        ]
+        ica.exclude = rejected
+        ica.save(path, overwrite=True)
+
+        subject = self.get('subject')
+        out_dir = Path(DATA_ROOT) / 'derivatives' / 'mne' / f'sub-{subject}' / 'eeg'
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = f'sub-{subject}_task-cocktail_desc-iclabel_components'
+
+        with open(out_dir / f'{stem}.tsv', 'w') as f:
+            f.write('component\tlabel\tprobability\trejected\n')
+            for i, (label, prob) in enumerate(zip(labels, probs)):
+                f.write(f'{i}\t{label}\t{prob:.4f}\t{i in rejected}\n')
+
+        n = ica.n_components_
+        ncols = 8
+        nrows = -(-n // ncols)  # ceiling division
+        fig, axes = plt.subplots(nrows, ncols, figsize=(2 * ncols, 2.4 * nrows), squeeze=False)
+        components = ica.get_components()
+        for i, ax in enumerate(axes.flatten()):
+            if i >= n:
+                ax.axis('off')
+                continue
+            mne.viz.plot_topomap(components[:, i], ica.info, axes=ax, show=False)
+            is_bad = i in rejected
+            ax.set_title(f'IC{i}: {labels[i]}\np={probs[i]:.2f}', fontsize=7, color='crimson' if is_bad else 'black')
+            for spine in ax.spines.values():
+                spine.set_edgecolor('crimson' if is_bad else 'lightgray')
+                spine.set_linewidth(2 if is_bad else 1)
+        fig.suptitle(f'sub-{subject}: ICLabel components (red = auto-rejected)')
+        fig.tight_layout()
+        fig.savefig(out_dir / f'{stem}.png', dpi=150)
+        plt.close(fig)
+
+        print(f"  ICLabel rejected {len(rejected)}/{n} components: {rejected}")
+        print(f"  see {out_dir / (stem + '.tsv')} and the matching .png")
 
     def label_events(self, ds):
         # Trigger codes 1 and 2 mark the start of a story; anything else
