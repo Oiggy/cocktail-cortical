@@ -43,13 +43,15 @@ you've cloned the repo:
 ```
 
 Every script works this location out on its own, from its own file
-location (`REPO_ROOT.parent / "dataset" / "cocktail"`), so no path
-needs editing and nothing here depends on your username or which
-folder you cloned the repo into. If you'd rather put the dataset
-somewhere else entirely, edit `DATA_ROOT` in `data/bids_extraction.py`,
-`predictors/gammatone_predictors.py`, `predictors/duration.py`,
-`diagnostics/explore_gammatone_settings.py`, `diagnostics/check_montage.py`,
-and `analysis/experiment.py`.
+location, so no path needs editing and nothing here depends on your
+username or which folder you cloned the repo into. If you'd rather put
+the dataset somewhere else entirely, edit `DATA_ROOT` in
+`data/bids_extraction.py`, `predictors/gammatone_predictors.py`,
+`predictors/duration.py`, `diagnostics/explore_gammatone_settings.py`,
+and `diagnostics/check_montage.py` (all point at the outer
+`dataset/cocktail` folder), and in `analysis/experiment.py` (points
+one level deeper, directly at `dataset/cocktail/bids`, since that's
+what eelbrain's `Pipeline` requires).
 
 Your `eeg/sX/` folders may already contain a `-bad_channels.txt` and an
 `ica-ica.fif` from earlier work on this data - those were generated
