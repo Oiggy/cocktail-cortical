@@ -109,14 +109,15 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    and just click through every time you run the notebook.
 
    Bad channels can be marked automatically instead, skipping that one
-   window: `e.preprocess_all_subjects(auto_bad_channels_r=0.3)`. This
-   uses eelbrain's own `make_bad_channels_neighbor_correlation()` -
+   window:
+   `e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3)`.
+   This uses eelbrain's own `make_bad_channels_neighbor_correlation()` -
    the same neighbor-correlation computation behind the GUI's "Neighbor
    corr" scalp maps - to mark any channel correlating with its
    neighbors below `0.3` as bad, with no GUI for that step. ICA
    component selection still opens its own window either way; only the
-   bad-channel step changes. Leave the argument out (or pass nothing)
-   to keep doing bad channels by hand.
+   bad-channel step changes. Leave both arguments out (or explicitly
+   pass `manual_bad_channels=True`) to keep doing bad channels by hand.
 
    The rest of the notebook is the actual analysis: envelope model
    checks, the dichotic ear-of-presentation comparison, the

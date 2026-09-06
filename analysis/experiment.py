@@ -235,7 +235,7 @@ class BinauralCocktail(Pipeline):
         'boosting': Boosting(basis=0.050, error='l1', partitions=-4, selective_stopping=1),
     }
 
-    def preprocess_all_subjects(self, skip=(), auto_bad_channels_r=None):
+    def preprocess_all_subjects(self, skip=(), auto_bad_channels_r=False, manual_bad_channels=True):
         """Run the interactive part of steps 1 and 4 of `raw`, for every subject.
 
         `raw` above only describes *how* to compute each stage; steps 1
@@ -255,18 +255,29 @@ class BinauralCocktail(Pipeline):
         subject that's already done is never reprocessed. Pass
         `skip=['01', ...]` to explicitly resume partway through.
 
+        manual_bad_channels
+            True (default): mark bad channels by hand, in the GUI.
         auto_bad_channels_r
-            Bad channels are still picked by hand, in the GUI, by
-            default (leave this as None). Pass a correlation threshold
-            here (e.g. 0.3) to mark bad channels automatically instead:
-            eelbrain's own make_bad_channels_neighbor_correlation()
-            computes each channel's correlation with its neighbors -
-            the exact same computation behind the GUI's "Neighbor
-            corr" scalp maps - and marks any channel below this
-            threshold as bad, with no window to close. ICA component
-            selection stays interactive either way; only the bad
-            channel step changes.
+            Correlation threshold (e.g. 0.3) for finding bad channels
+            automatically instead - only used when `manual_bad_channels`
+            is False. eelbrain's own
+            make_bad_channels_neighbor_correlation() computes each
+            channel's correlation with its neighbors - the exact same
+            computation behind the GUI's "Neighbor corr" scalp maps -
+            and marks any channel below this threshold as bad, with no
+            window to close.
+
+        Either way, ICA component selection stays interactive - only
+        the bad-channel step changes:
+            e.preprocess_all_subjects()                                          # GUI (default)
+            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3)  # automatic
         """
+        if not manual_bad_channels and auto_bad_channels_r is False:
+            raise ValueError(
+                "manual_bad_channels=False needs a real auto_bad_channels_r "
+                "threshold (e.g. 0.3), not the default False."
+            )
+
         # Pipeline's own subject values, as found in the BIDS dataset -
         # plain "01", "02", ... (no "sub-" prefix; that prefix is only
         # part of the folder/file names on disk, not the subject field
@@ -279,7 +290,7 @@ class BinauralCocktail(Pipeline):
 
             print(f"\n=== {subject} ===")
             self.set(subject=subject)
-            if auto_bad_channels_r is None:
+            if manual_bad_channels:
                 self.make_bad_channels_selection()
                 # gui.run() hands control to the open window and waits
                 # for it to close before continuing. In a plain
