@@ -35,10 +35,11 @@ What runs, top to bottom, the moment this file is imported
 - Build SEGMENT_DURATION: a lookup table of how long (in seconds) each
   audio stimulus is, so eelbrain knows how much EEG to cut out for each
   one.
-- Build CH_MAP: renames the EEG cap's numbered electrodes (A1, A2, ...)
-  to their standard names (Fp1, AF7, ...) that other software recognizes.
 - Load MONTAGE from biosemi64mod.txt: the physical 3D position of each
-  electrode, needed to draw scalp maps.
+  electrode, needed to draw scalp maps. (Channels were already renamed
+  from the cap's numbered electrodes, A1, A2, ..., to these standard
+  names, back in data/bids_extraction.py, before the recordings were
+  even written to BIDS - not here.)
 - Build SPEAKER / SPATIAL / SIDE: lookup tables describing the
   experiment design itself, i.e. which speaker, which listening
   condition, and which ear applied to each of the 12 segments a
@@ -120,29 +121,19 @@ SEGMENT_DURATION = {
     'female_12': 245.898,
 }
 
-# The BioSemi cap numbers electrodes A1-A32, B1-B32. This maps those
-# numbers to standard 10-20 electrode names, so plots and montages use
-# names other EEG software recognizes.
-CH_MAP = {
-    'A1': 'Fp1', 'A2': 'AF7', 'A3': 'AF3', 'A4': 'F1', 'A5': 'F3', 'A6': 'F5',
-    'A7': 'F7', 'A8': 'FT7', 'A9': 'FC5', 'A10': 'FC3', 'A11': 'FC1',
-    'A12': 'C1', 'A13': 'C3', 'A14': 'C5', 'A15': 'T7', 'A16': 'TP7',
-    'A17': 'CP5', 'A18': 'CP3', 'A19': 'CP1', 'A20': 'P1', 'A21': 'P3',
-    'A22': 'P5', 'A23': 'P7', 'A24': 'P9', 'A25': 'PO7', 'A26': 'PO3',
-    'A27': 'O1', 'A28': 'Iz', 'A29': 'Oz', 'A30': 'POz', 'A31': 'Pz',
-    'A32': 'CPz',
-    'B1': 'Fpz', 'B2': 'Fp2', 'B3': 'AF8', 'B4': 'AF4', 'B5': 'AFz',
-    'B6': 'Fz', 'B7': 'F2', 'B8': 'F4', 'B9': 'F6', 'B10': 'F8',
-    'B11': 'FT8', 'B12': 'FC6', 'B13': 'FC4', 'B14': 'FC2', 'B15': 'FCz',
-    'B16': 'Cz', 'B17': 'C2', 'B18': 'C4', 'B19': 'C6', 'B20': 'T8',
-    'B21': 'TP8', 'B22': 'CP6', 'B23': 'CP4', 'B24': 'CP2', 'B25': 'P2',
-    'B26': 'P4', 'B27': 'P6', 'B28': 'P8', 'B29': 'P10', 'B30': 'PO8',
-    'B31': 'PO4', 'B32': 'O2',
-    # Extra channels: four around the eyes (for detecting blinks), two
-    # mastoid channels used as the reference.
-    'EXG1': 'EOG-LS', 'EXG2': 'EOG-LI', 'EXG3': 'EOG-L', 'EXG4': 'EOG-R',
-    'EXG5': 'A1', 'EXG6': 'A2',
-}
+# Channel names here are already the renamed ones (Fp1, AF7, ..., plus
+# the two mastoid channels as "A1"/"A2") - see data/bids_extraction.py's
+# CH_MAP for that renaming. It has to happen there, before the
+# recordings are written to BIDS, not here: eelbrain's interactive
+# bad-channel selection GUI checks each channel's name against BIDS's
+# own channels.tsv file, and that file is written once, at BIDS-extraction
+# time, with whatever names the recording had then. Renaming again here
+# (after loading from BIDS) would make live channel names disagree with
+# channels.tsv, and the GUI would end up matching almost no channels -
+# this was a real bug, and exactly the failure that first exposed it:
+#   QhullError: QH6214 qhull input error: not enough points(2) to
+#   construct initial simplex (need 4)
+# (only the 2 mastoid channels coincidentally matched by name).
 
 MONTAGE = mne.channels.read_custom_montage('biosemi64mod.txt')
 
@@ -185,7 +176,10 @@ class BinauralCocktail(Pipeline):
         # STEP 1 - load the recording. Pipeline finds each subject's raw
         # file automatically from the BIDS dataset (whatever format it's
         # in), so unlike a plain filename, nothing needs to be specified
-        # here beyond how to prepare the channels.
+        # here beyond how to prepare the channels. Channels arrive
+        # already renamed by data/bids_extraction.py (see the comment
+        # above MONTAGE near the top of this file for why) - only the
+        # montage (electrode positions) needs applying here.
         #
         # Bad channels are excluded right here, automatically, the
         # moment this stage loads - not because this dict says so, but
@@ -196,7 +190,6 @@ class BinauralCocktail(Pipeline):
         # stage below inherits whatever gets excluded here.
         'raw': RawSource(
             adjacency='auto',
-            rename_channels=CH_MAP,
             montage=MONTAGE,
         ),
         # STEP 2 - band-pass filter for the cortical analysis: cortical

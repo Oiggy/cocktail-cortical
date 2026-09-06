@@ -81,7 +81,14 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
 ## Pipeline (run in this order)
 
 1. **`data/bids_extraction.py`** - converts the raw `.bdf` recordings
-   into the standard BIDS folder layout under `bids/`.
+   into the standard BIDS folder layout under `bids/`, and renames the
+   electrodes from the cap's numbered names (A1, A2, ...) to standard
+   10-20 names (Fp1, AF7, ...) at the same time. If you already ran
+   this before the channel renaming moved here (from
+   `analysis/experiment.py`), re-run it - it overwrites `bids/` safely,
+   and the old, not-yet-renamed `bids/` files will otherwise make
+   `e.make_bad_channels_selection()` fail with a
+   `QhullError: ... not enough points(2) ...`.
 2. **`predictors/duration.py`** - measures each stimulus's length
    (already saved in `experiment.py`; only needed if the stimuli change).
 3. **`predictors/gammatone_predictors.py`** - builds the cortical speech predictors
@@ -137,3 +144,16 @@ double-checking.
 during conversion (confirmed: `data/bids_extraction.py`'s output is
 `bids/sub-XX/eeg/sub-XX_task-cocktail_eeg.bdf`), which is what
 `analysis/experiment.py`'s `RawSource` reads.
+
+Channel renaming (the cap's numbered electrodes, A1, A2, ..., to
+standard 10-20 names) happens in `data/bids_extraction.py`, before
+this BIDS write, not later when `RawSource` loads the data. That has
+to be the order: eelbrain's interactive bad-channel selection GUI
+cross-checks each channel's name against the `channels.tsv` file BIDS
+writes here, and that file only ever holds whatever names the
+recording had at write time. Renaming again afterwards would make the
+live recording's names disagree with `channels.tsv`, and the GUI would
+end up matching almost none of the channels - which is exactly what
+happened before this was fixed (`QhullError: ... not enough points(2)
+to construct initial simplex (need 4)`, from the 2 channels that
+happened to match by name coincidence).

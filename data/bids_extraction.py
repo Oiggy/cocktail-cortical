@@ -13,6 +13,13 @@ Run this first, before predictors/gammatone_predictors.py or analysis/experiment
 This only converts the raw recordings. Bad-channel marking and ICA
 fitting happen afterwards, interactively, through eelbrain itself (see
 the note at the bottom of this file) - they are not part of this script.
+
+Channels are renamed here, before writing BIDS (see CH_MAP below), not
+later in analysis/experiment.py. eelbrain's interactive bad-channel
+GUI cross-checks the recording's channel names against the
+`channels.tsv` file BIDS writes here, and that check breaks if the two
+don't already match - so the names written to `channels.tsv` have to
+be the final, renamed ones from the start.
 """
 import re
 from pathlib import Path
@@ -61,6 +68,32 @@ CHANNEL_TYPES = {
     "Temp": "misc",
 }
 
+# The BioSemi cap numbers electrodes A1-A32, B1-B32. This maps those
+# numbers to standard 10-20 electrode names, so plots and montages use
+# names other EEG software recognizes. Must match analysis/experiment.py's
+# copy of this same mapping (kept in both files rather than shared,
+# since each script here is meant to be read on its own).
+CH_MAP = {
+    'A1': 'Fp1', 'A2': 'AF7', 'A3': 'AF3', 'A4': 'F1', 'A5': 'F3', 'A6': 'F5',
+    'A7': 'F7', 'A8': 'FT7', 'A9': 'FC5', 'A10': 'FC3', 'A11': 'FC1',
+    'A12': 'C1', 'A13': 'C3', 'A14': 'C5', 'A15': 'T7', 'A16': 'TP7',
+    'A17': 'CP5', 'A18': 'CP3', 'A19': 'CP1', 'A20': 'P1', 'A21': 'P3',
+    'A22': 'P5', 'A23': 'P7', 'A24': 'P9', 'A25': 'PO7', 'A26': 'PO3',
+    'A27': 'O1', 'A28': 'Iz', 'A29': 'Oz', 'A30': 'POz', 'A31': 'Pz',
+    'A32': 'CPz',
+    'B1': 'Fpz', 'B2': 'Fp2', 'B3': 'AF8', 'B4': 'AF4', 'B5': 'AFz',
+    'B6': 'Fz', 'B7': 'F2', 'B8': 'F4', 'B9': 'F6', 'B10': 'F8',
+    'B11': 'FT8', 'B12': 'FC6', 'B13': 'FC4', 'B14': 'FC2', 'B15': 'FCz',
+    'B16': 'Cz', 'B17': 'C2', 'B18': 'C4', 'B19': 'C6', 'B20': 'T8',
+    'B21': 'TP8', 'B22': 'CP6', 'B23': 'CP4', 'B24': 'CP2', 'B25': 'P2',
+    'B26': 'P4', 'B27': 'P6', 'B28': 'P8', 'B29': 'P10', 'B30': 'PO8',
+    'B31': 'PO4', 'B32': 'O2',
+    # Extra channels: four around the eyes (for detecting blinks), two
+    # mastoid channels used as the reference.
+    'EXG1': 'EOG-LS', 'EXG2': 'EOG-LI', 'EXG3': 'EOG-L', 'EXG4': 'EOG-R',
+    'EXG5': 'A1', 'EXG6': 'A2',
+}
+
 # The trigger channel marks the moment each audio stimulus started, using
 # small integer codes. 65536 is a spurious value the BioSemi amplifier
 # sometimes emits and isn't a real trigger, so it gets filtered out.
@@ -78,6 +111,7 @@ for subject_dir in SUBJECT_FOLDERS:
 
     raw = mne.io.read_raw_bdf(raw_file, preload=False)
     raw.set_channel_types(CHANNEL_TYPES, on_unit_change="ignore")
+    raw.rename_channels(CH_MAP)
 
     events = mne.find_events(raw, stim_channel="Status")
     events = events[events[:, 2] != SPURIOUS_TRIGGER_VALUE]
