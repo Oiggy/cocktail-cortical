@@ -257,9 +257,13 @@ class BinauralCocktail(Pipeline):
 
         Results are cached per subject (see steps 1 and 4 above), so a
         subject that's already done is never reprocessed. Pass
-        `skip=['sub-01', ...]` to explicitly resume partway through.
+        `skip=['01', ...]` to explicitly resume partway through.
         """
-        subjects = [f'sub-{i:02d}' for i in range(1, 14)]  # sub-01 .. sub-13
+        # Pipeline's own subject values, as found in the BIDS dataset -
+        # plain "01", "02", ... (no "sub-" prefix; that prefix is only
+        # part of the folder/file names on disk, not the subject field
+        # value itself).
+        subjects = self.get_field_values('subject')
 
         for subject in subjects:
             if subject in skip:
