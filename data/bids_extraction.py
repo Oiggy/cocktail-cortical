@@ -109,7 +109,10 @@ for subject_dir in SUBJECT_FOLDERS:
     subject_num = int(subject_name[1:])
     raw_file = subject_dir / f"{subject_name}_cocktail.bdf"
 
-    raw = mne.io.read_raw_bdf(raw_file, preload=False)
+    # preload=True: needed below so write_raw_bids can actually re-export
+    # the recording (with the renamed channels) rather than just copying
+    # the original file's bytes unchanged.
+    raw = mne.io.read_raw_bdf(raw_file, preload=True)
     raw.set_channel_types(CHANNEL_TYPES, on_unit_change="ignore")
     raw.rename_channels(CH_MAP)
 
@@ -130,14 +133,24 @@ for subject_dir in SUBJECT_FOLDERS:
         events=events,
         event_id=EVENT_ID,
         overwrite=True,
+        # format="BDF" (rather than the default "auto") forces mne-bids
+        # to actually re-export the recording using this renamed `raw`
+        # object. Without it, since the input is already .bdf and BIDS
+        # allows keeping that format, mne-bids takes a shortcut: it
+        # copies the *original* .bdf file's bytes as-is and only writes
+        # the renamed names into channels.tsv - leaving the real
+        # recording still carrying the original A1/A2/.../EXG1/...
+        # channel names, silently disagreeing with channels.tsv.
+        format="BDF",
     )
 
     print(f"Wrote {subject_name} to {bids_path.directory}")
 
-# Note: mne-bids keeps the recording in its original .bdf format here
-# (BDF doesn't need to be converted, unlike some other formats), so the
-# output is BIDS_ROOT/sub-XX/eeg/sub-XX_task-cocktail_eeg.bdf. This
-# matches the pattern used in analysis/experiment.py's RawSource.
+# Note: the output stays in .bdf format here (format="BDF" above just
+# forces mne-bids to re-export it - see the comment there - not switch
+# to a different file type), so the output is
+# BIDS_ROOT/sub-XX/eeg/sub-XX_task-cocktail_eeg.bdf. This matches the
+# pattern used in analysis/experiment.py's RawSource.
 #
 # Bad channels and ICA: after this conversion, those `.bdf` files have
 # no bad-channel or ICA information yet (those are per-subject files

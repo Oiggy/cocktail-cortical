@@ -140,10 +140,9 @@ double-checking.
 
 ## A note on BIDS conversion
 
-`mne-bids` keeps BioSemi recordings in their original `.bdf` format
-during conversion (confirmed: `data/bids_extraction.py`'s output is
-`bids/sub-XX/eeg/sub-XX_task-cocktail_eeg.bdf`), which is what
-`analysis/experiment.py`'s `RawSource` reads.
+The output stays in `.bdf` format (confirmed: `data/bids_extraction.py`'s
+output is `bids/sub-XX/eeg/sub-XX_task-cocktail_eeg.bdf`), which is
+what `analysis/experiment.py`'s `RawSource` reads.
 
 Channel renaming (the cap's numbered electrodes, A1, A2, ..., to
 standard 10-20 names) happens in `data/bids_extraction.py`, before
@@ -153,7 +152,20 @@ cross-checks each channel's name against the `channels.tsv` file BIDS
 writes here, and that file only ever holds whatever names the
 recording had at write time. Renaming again afterwards would make the
 live recording's names disagree with `channels.tsv`, and the GUI would
-end up matching almost none of the channels - which is exactly what
-happened before this was fixed (`QhullError: ... not enough points(2)
-to construct initial simplex (need 4)`, from the 2 channels that
-happened to match by name coincidence).
+end up matching almost none of the channels.
+
+That alone isn't enough, though: by default, when the input is already
+`.bdf` and BIDS allows keeping that format, `write_raw_bids` takes a
+shortcut and copies the *original* file's bytes unchanged - so a
+rename made in Python never actually reaches the copied recording,
+only `channels.tsv` (which is written from the in-memory, renamed
+data). `data/bids_extraction.py` passes `format="BDF"` explicitly to
+force a real re-export instead of a raw copy, so the written recording
+and `channels.tsv` always agree. Two real bugs, both from this same
+mismatch, showed up while getting this right:
+  `QhullError: ... not enough points(2) to construct initial simplex
+  (need 4)` (only 2 channels happened to match by name coincidence),
+  and then a `set_montage` `ValueError` listing dozens of channels as
+  "not present in the DigMontage" (the real recording still had its
+  original, un-renamed names, even though channels.tsv already showed
+  the renamed ones).
