@@ -55,9 +55,8 @@ What runs, top to bottom, the moment this file is imported
       ICA artifact components). This is a method, not a script, so it
       only runs when something calls it - see "What this file is for"
       above for where that happens.
-    - fix_events / label_events: how to figure out, from the trigger
-      codes in the recording, which condition and which stimulus each
-      segment was.
+    - label_events: how to figure out, from the trigger codes in the
+      recording, which condition and which stimulus each segment was.
     - epochs: which time windows of EEG to extract, and how to split
       them up by condition (clean / diotic / binaural / dichotic).
     - predictors: which generated predictor files (from
@@ -280,12 +279,17 @@ class BinauralCocktail(Pipeline):
 
         print("\nDone. Every subject has bad channels marked and ICA fit.")
 
-    def fix_events(self, ds):
+    def label_events(self, ds):
         # Trigger codes 1 and 2 mark the start of a story; anything else
         # in the trigger channel isn't a stimulus onset and is dropped.
-        return ds.sub("value.isin((1, 2))")
+        # This has to happen here, as the first step of label_events,
+        # rather than in a separate fix_events method - Pipeline (unlike
+        # the older MneExperiment API) doesn't call a fix_events hook,
+        # confirmed against the original author's own reference
+        # implementation for this dataset (see the Setup section of
+        # the README).
+        ds = ds.sub("value.isin((1, 2))")
 
-    def label_events(self, ds):
         # The trigger value (1 or 2) tells us which of the two stimulus
         # lists was used for this subject/recording.
         list_id = ds[0, 'value']
