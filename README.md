@@ -94,7 +94,7 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
 5. **`analysis/cortical_analysis.ipynb`** - open this in Jupyter and run
    the cells top to bottom. The second cell runs
    `e.preprocess_all_subjects()`: it loops over every subject
-   automatically - `make_bad_channels()` and `make_ica_selection()`
+   automatically - `make_bad_channels_selection()` and `make_ica_selection()`
    each open a plot and pause until you close it, so the loop advances
    to the next subject the moment you're done with the current one,
    nothing to edit or re-run by hand. Results are cached per subject,

@@ -192,9 +192,9 @@ class BinauralCocktail(Pipeline):
         # moment this stage loads - not because this dict says so, but
         # because RawSource always checks for a per-subject
         # bad-channels file first. That file is created by running
-        # `e.make_bad_channels()`, which the preprocess_all_subjects()
-        # method below calls for you. Every stage below inherits
-        # whatever gets excluded here.
+        # `e.make_bad_channels_selection()`, which the
+        # preprocess_all_subjects() method below calls for you. Every
+        # stage below inherits whatever gets excluded here.
         'raw': RawSource(
             adjacency='auto',
             rename_channels=CH_MAP,
@@ -250,9 +250,9 @@ class BinauralCocktail(Pipeline):
         This method is what actually walks through every subject and
         asks for that input, one subject at a time.
 
-        Both make_bad_channels() and make_ica_selection() open a plot
-        and pause until you close it, so this loop advances to the
-        next subject automatically the moment you're done with the
+        Both make_bad_channels_selection() and make_ica_selection() open
+        a plot and pause until you close it, so this loop advances to
+        the next subject automatically the moment you're done with the
         current one - there's nothing else to run or edit by hand.
 
         Results are cached per subject (see steps 1 and 4 above), so a
@@ -271,8 +271,12 @@ class BinauralCocktail(Pipeline):
 
             print(f"\n=== {subject} ===")
             self.set(subject=subject)
-            self.make_bad_channels()
-            self.make_ica_selection(epoch='clean', decim=16)
+            self.make_bad_channels_selection()
+            # raw='ica' points this at the 'ica' stage in `raw` above
+            # (the one built with RawICA) - without it, this defaults
+            # to whatever the current `raw` state happens to be, which
+            # may be a stage upstream of ICA and would fail.
+            self.make_ica_selection(raw='ica', epoch='clean', decim=16)
 
         print("\nDone. Every subject has bad channels marked and ICA fit.")
 
