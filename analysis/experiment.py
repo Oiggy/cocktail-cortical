@@ -66,7 +66,7 @@ What runs, top to bottom, the moment this file is imported
   ready-to-use pipeline object, `e`, that every analysis script imports.
   This is the only line that produces something other scripts use.
 """
-from eelbrain import Factor, Var
+from eelbrain import Factor, Var, gui
 from eelbrain.pipeline import *
 import mne
 from pathlib import Path
@@ -243,9 +243,11 @@ class BinauralCocktail(Pipeline):
         asks for that input, one subject at a time.
 
         Both make_bad_channels_selection() and make_ica_selection() open
-        a plot and pause until you close it, so this loop advances to
-        the next subject automatically the moment you're done with the
-        current one - there's nothing else to run or edit by hand.
+        a plot; the gui.run() call right after each one is what actually
+        pauses execution until you close that window, so this loop
+        advances to the next subject automatically the moment you're
+        done with the current one - there's nothing else to run or edit
+        by hand.
 
         Results are cached per subject (see steps 1 and 4 above), so a
         subject that's already done is never reprocessed. Pass
@@ -264,11 +266,20 @@ class BinauralCocktail(Pipeline):
             print(f"\n=== {subject} ===")
             self.set(subject=subject)
             self.make_bad_channels_selection()
+            # gui.run() hands control to the open window and waits for
+            # it to close before continuing. In a plain terminal,
+            # eelbrain can do this on its own the moment the window
+            # opens; in Jupyter it can't (its message says so - "Use
+            # eelbrain.gui.run() to start GUI interaction"), so without
+            # this line the loop would race ahead to the next subject
+            # before you've even looked at the window.
+            gui.run()
             # raw='ica' points this at the 'ica' stage in `raw` above
             # (the one built with RawICA) - without it, this defaults
             # to whatever the current `raw` state happens to be, which
             # may be a stage upstream of ICA and would fail.
             self.make_ica_selection(raw='ica', epoch='clean', decim=16)
+            gui.run()
 
         print("\nDone. Every subject has bad channels marked and ICA fit.")
 
