@@ -395,8 +395,29 @@ class BinauralCocktail(Pipeline):
         # what the actual analysis needs, not what the classifier needs.
         # So this reprocesses a throwaway *copy* of the data just for
         # classification; nothing about the real preprocessing changes.
-        raw = self.load_raw(preload=True, raw='0.5-20-mast')
+        #
+        # Source from 'raw' (before any of this project's own filtering),
+        # not '0.5-20-mast': that stage is already low-pass filtered to
+        # 20 Hz, and a filter can never restore content above a cutoff
+        # that's already been removed - asking for 1-100 Hz on top of
+        # already-0.5-20-Hz data leaves the real upper edge stuck at 20 Hz,
+        # which is exactly the mismatch mne-icalabel's own warning caught:
+        # "Raw instance is not filtered between 1 and 100 Hz."
+        #
+        # preload=False + tstart/tstop crops the *lazy* file window before
+        # anything is actually read into memory - load_raw() only calls
+        # load_data() itself when samplingrate or preload is requested, so
+        # with preload=False here, cropping happens first and the
+        # subsequent filter() below (which preloads on its own) then only
+        # ever reads that cropped window. preload=True here instead would
+        # load the full continuous recording - at its native ~4096 Hz - in
+        # full before cropping, which is large enough to exhaust memory
+        # outright (this crashed the Jupyter kernel entirely). A few
+        # minutes is already enough data for stable topography/spectrum
+        # features, so there's no need for more.
+        raw = self.load_raw(preload=False, raw='raw', tstart=0, tstop=300)
         raw_for_iclabel = raw.copy()
+        raw_for_iclabel.pick(ica.ch_names)
         raw_for_iclabel.filter(1., 100., verbose=False)
         raw_for_iclabel.set_eeg_reference('average', verbose=False)
 
