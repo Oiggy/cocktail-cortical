@@ -184,10 +184,12 @@ class BinauralCocktail(Pipeline):
         # Bad channels are excluded right here, automatically, the
         # moment this stage loads - not because this dict says so, but
         # because RawSource always checks for a per-subject
-        # bad-channels file first. That file is created by running
-        # `e.make_bad_channels_selection()`, which the
-        # preprocess_all_subjects() method below calls for you. Every
-        # stage below inherits whatever gets excluded here.
+        # bad-channels file first. That file is created by
+        # preprocess_all_subjects() below, either interactively
+        # (make_bad_channels_selection()) or automatically
+        # (make_bad_channels_neighbor_correlation()) depending on how
+        # it's called. Every stage below inherits whatever gets
+        # excluded here.
         'raw': RawSource(
             adjacency='auto',
             montage=MONTAGE,
@@ -233,7 +235,7 @@ class BinauralCocktail(Pipeline):
         'boosting': Boosting(basis=0.050, error='l1', partitions=-4, selective_stopping=1),
     }
 
-    def preprocess_all_subjects(self, skip=()):
+    def preprocess_all_subjects(self, skip=(), auto_bad_channels_r=None):
         """Run the interactive part of steps 1 and 4 of `raw`, for every subject.
 
         `raw` above only describes *how* to compute each stage; steps 1
@@ -252,6 +254,18 @@ class BinauralCocktail(Pipeline):
         Results are cached per subject (see steps 1 and 4 above), so a
         subject that's already done is never reprocessed. Pass
         `skip=['01', ...]` to explicitly resume partway through.
+
+        auto_bad_channels_r
+            Bad channels are still picked by hand, in the GUI, by
+            default (leave this as None). Pass a correlation threshold
+            here (e.g. 0.3) to mark bad channels automatically instead:
+            eelbrain's own make_bad_channels_neighbor_correlation()
+            computes each channel's correlation with its neighbors -
+            the exact same computation behind the GUI's "Neighbor
+            corr" scalp maps - and marks any channel below this
+            threshold as bad, with no window to close. ICA component
+            selection stays interactive either way; only the bad
+            channel step changes.
         """
         # Pipeline's own subject values, as found in the BIDS dataset -
         # plain "01", "02", ... (no "sub-" prefix; that prefix is only
@@ -265,15 +279,22 @@ class BinauralCocktail(Pipeline):
 
             print(f"\n=== {subject} ===")
             self.set(subject=subject)
-            self.make_bad_channels_selection()
-            # gui.run() hands control to the open window and waits for
-            # it to close before continuing. In a plain terminal,
-            # eelbrain can do this on its own the moment the window
-            # opens; in Jupyter it can't (its message says so - "Use
-            # eelbrain.gui.run() to start GUI interaction"), so without
-            # this line the loop would race ahead to the next subject
-            # before you've even looked at the window.
-            gui.run()
+            if auto_bad_channels_r is None:
+                self.make_bad_channels_selection()
+                # gui.run() hands control to the open window and waits
+                # for it to close before continuing. In a plain
+                # terminal, eelbrain can do this on its own the moment
+                # the window opens; in Jupyter it can't (its message
+                # says so - "Use eelbrain.gui.run() to start GUI
+                # interaction"), so without this line the loop would
+                # race ahead to the next subject before you've even
+                # looked at the window.
+                gui.run()
+            else:
+                _, bad_channels = self.make_bad_channels_neighbor_correlation(
+                    auto_bad_channels_r, epoch='clean',
+                )
+                print(f"  bad channels (r < {auto_bad_channels_r}): {bad_channels or 'none'}")
             # raw='ica' points this at the 'ica' stage in `raw` above
             # (the one built with RawICA) - without it, this defaults
             # to whatever the current `raw` state happens to be, which
