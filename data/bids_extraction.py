@@ -142,6 +142,12 @@ for subject_dir in SUBJECT_FOLDERS:
         # recording still carrying the original A1/A2/.../EXG1/...
         # channel names, silently disagreeing with channels.tsv.
         format="BDF",
+        # mne-bids requires this explicit opt-in whenever `raw` is
+        # already preloaded (it can't tell on its own whether preloading
+        # was just to read the data, like here, or to modify it in ways
+        # that would need re-checking) - we do need preload=True above,
+        # for the re-export format="BDF" forces.
+        allow_preload=True,
     )
 
     print(f"Wrote {subject_name} to {bids_path.directory}")
