@@ -125,6 +125,19 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    `confirm_overwrite=False` to skip the prompts entirely and always
    (re)run every requested subject, as before.
 
+   `select_ica_artifacts()` additionally checks each already-done
+   subject's saved ICA against their *current* bad channels, and
+   forces a redo automatically - skipping the prompt entirely - for
+   any subject where the two no longer match (e.g. because
+   `mark_bad_channels()` changed what's excluded for them after ICA
+   was already fit). eelbrain refuses to reuse an ICA fit on a
+   different channel set than the one actually in use, so there's
+   nothing to ask there - the only real choice is recomputing ICA or
+   reverting the bad-channels change, and this always recomputes it,
+   rather than leaving a mismatch that would otherwise only surface
+   later as a `ProtectedArtifactError` the first time something else
+   (e.g. `load_trfs()`) needs that subject's data.
+
    Bad channels can be marked automatically instead, skipping that one
    window:
    `e.mark_bad_channels('all', manual_bad_channels=False, auto_bad_channels_r=0.3)`.

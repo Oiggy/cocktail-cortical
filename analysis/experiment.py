@@ -70,6 +70,12 @@ What runs, top to bottom, the moment this file is imported
 """
 from eelbrain import Factor, Var, gui
 from eelbrain.pipeline import *
+# Private import: this is the exception eelbrain itself raises when a saved
+# ICA file no longer matches the bad channels (or other raw settings) it was
+# fit against - see _ica_is_stale() below. Not part of eelbrain's public API,
+# so this could break on a future eelbrain version; if the import ever fails,
+# the fix is to find wherever ProtectedArtifactError lives in that version.
+from eelbrain._experiment.derivative_cache.base import ProtectedArtifactError
 import mne
 from pathlib import Path
 
@@ -267,7 +273,28 @@ class BinauralCocktail(Pipeline):
         _auto_select_ica() below writes its .tsv/.png to."""
         return Path(DATA_ROOT) / 'derivatives' / 'mne' / f'sub-{subject}' / 'eeg'
 
-    def _filter_already_done(self, subjects_arg, resolved_subjects, glob_pattern, description):
+    def _ica_is_stale(self, subject):
+        """True if `subject`'s saved ICA file no longer matches their
+        current bad channels (or whatever else the 'ica' raw stage
+        depends on) - e.g. because mark_bad_channels() changed what's
+        excluded after ICA was already fit for them.
+
+        This is exactly the check eelbrain itself makes before handing
+        out a saved ICA file (see ProtectedArtifactError): loading it
+        without accept_stale raises if the two disagree. Used by
+        _filter_already_done() below so select_ica_artifacts() can
+        force a redo automatically for a stale subject, instead of
+        this surfacing later as a cryptic error the first time
+        something else (e.g. load_trfs()) needs that subject's cleaned
+        data.
+        """
+        try:
+            self.load_ica(raw='ica', subject=subject)
+        except ProtectedArtifactError:
+            return True
+        return False
+
+    def _filter_already_done(self, subjects_arg, resolved_subjects, glob_pattern, description, is_stale=None):
         """Drop subjects that already have saved output, after asking.
 
         Used by mark_bad_channels() and select_ica_artifacts() when
@@ -279,19 +306,31 @@ class BinauralCocktail(Pipeline):
         question - a subject with nothing saved yet is always run, no
         prompt needed.
 
-        The scope of the question matches the scope of the original
-        call, via `subjects_arg` (the raw `subjects` value the caller
-        passed in, before _resolve_subjects() expanded it):
+        is_stale
+            Optional `subject -> bool` check (select_ica_artifacts()
+            passes _ica_is_stale). A subject whose existing file is
+            stale is always redone - its old file can't be reused
+            regardless of what the caller would otherwise choose - so
+            it's never part of the skip/redo question below, and never
+            silently kept via a "skip" answer either.
+
+        The scope of the skip/redo question (for whichever already-done
+        subjects are left after removing stale ones) matches the scope
+        of the original call, via `subjects_arg` (the raw `subjects`
+        value the caller passed in, before _resolve_subjects() expanded
+        it):
           - `subjects_arg == 'all'`: one combined question covering
-            every already-done subject in the group at once - "skip
-            all of them" or "redo all of them", not one prompt per
-            subject.
+            every already-done, non-stale subject in the group at once
+            - "skip all of them" or "redo all of them", not one prompt
+            per subject.
           - a specific subject: a single, subject-specific question
             (there is only ever one subject to ask about in that case).
         Typing anything other than 'r' - including just pressing enter
         - skips, since skipping (keeping existing results) is the safer
         default than accidentally overwriting a manually-reviewed
-        selection.
+        selection. If nothing is left to ask about (every already-done
+        subject turned out stale, or there simply are none), no prompt
+        is shown at all.
         """
         already_done = {
             s: existing[0]
@@ -301,8 +340,19 @@ class BinauralCocktail(Pipeline):
         if not already_done:
             return resolved_subjects
 
+        stale = set()
+        if is_stale is not None:
+            for subject in already_done:
+                if is_stale(subject):
+                    stale.add(subject)
+                    print(f"  {subject}: {description} is stale (no longer matches current settings) - redoing.")
+
+        askable = {s: p for s, p in already_done.items() if s not in stale}
+        if not askable:
+            return resolved_subjects
+
         if subjects_arg == 'all':
-            names = ', '.join(already_done)
+            names = ', '.join(askable)
             answer = input(
                 f"  {description} already exists for: {names}. "
                 f"Skip all of them (default) or redo and overwrite all of them? [s/r]: "
@@ -310,9 +360,9 @@ class BinauralCocktail(Pipeline):
             if answer == 'r':
                 return resolved_subjects
             print(f"  skipping (already done): {names}")
-            return [s for s in resolved_subjects if s not in already_done]
+            return [s for s in resolved_subjects if s not in askable]
         else:
-            subject, existing_path = next(iter(already_done.items()))
+            subject, existing_path = next(iter(askable.items()))
             answer = input(
                 f"  {subject}: {description} already exists ({existing_path.name}). "
                 f"Skip (default) or redo and overwrite? [s/r]: "
@@ -320,7 +370,7 @@ class BinauralCocktail(Pipeline):
             if answer == 'r':
                 return resolved_subjects
             print(f"  skipping {subject} (already done)")
-            return []
+            return [s for s in resolved_subjects if s not in askable]
 
     def mark_bad_channels(
             self, subjects='all', skip=(),
@@ -472,13 +522,27 @@ class BinauralCocktail(Pipeline):
         `derivatives/mne/sub-XX/eeg/` (i.e. ICA has already been fit,
         and - in normal use, since nothing else in this project touches
         the 'ica' raw stage first - already reviewed for artifacts at
-        least once). If any do, and `confirm_overwrite` is True (the
-        default), it asks - via a plain text prompt, not a GUI -
-        whether to skip or redo them. The question's scope matches
-        `subjects`: with `subjects='all'`, one combined question covers
-        every already-done subject at once ("skip all of them" or "redo
-        all of them"), not a prompt per subject; with a specific
-        subject, the question is just about that one. See
+        least once).
+
+        Any of those whose ICA file is stale - no longer matching that
+        subject's *current* bad channels, e.g. because
+        mark_bad_channels() changed what's excluded for them after ICA
+        was already fit - are always redone, regardless of what you'd
+        otherwise choose below; eelbrain refuses to reuse an ICA fit on
+        a different set of channels than the ones actually in use now
+        (see _ica_is_stale()), so keeping a stale one isn't really an
+        option, only recomputing it or reverting the bad-channels
+        change is. Left as-is, a stale ICA doesn't fail here - it fails
+        later, as a confusing ProtectedArtifactError, the first time
+        something else (e.g. load_trfs()) needs that subject's data.
+
+        For whichever already-done subjects are left (not stale), if
+        `confirm_overwrite` is True (the default), it asks - via a
+        plain text prompt, not a GUI - whether to skip or redo them.
+        The question's scope matches `subjects`: with `subjects='all'`,
+        one combined question covers all of them at once ("skip all of
+        them" or "redo all of them"), not a prompt per subject; with a
+        specific subject, the question is just about that one. See
         confirm_overwrite below. Pass `skip=['01', ...]` to instead
         unconditionally skip specific subjects without being asked.
 
@@ -532,6 +596,7 @@ class BinauralCocktail(Pipeline):
         if confirm_overwrite:
             subjects_to_run = self._filter_already_done(
                 subjects, subjects_to_run, '*_ica.fif', "ICA file",
+                is_stale=self._ica_is_stale,
             )
 
         for subject in subjects_to_run:
