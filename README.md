@@ -95,22 +95,27 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    (envelope and onset gammatone spectrograms) from the stimulus audio.
 4. **`analysis/experiment.py`** - defines the eelbrain pipeline
    (preprocessing, epochs, predictors) that the analysis notebook
-   imports. Not run directly as a normal step; its
-   `preprocess_all_subjects()` method (mark bad channels, fit ICA, for
-   every subject) is called automatically by the notebook below.
+   imports. Not run directly as a normal step; its two preprocessing
+   methods, `mark_bad_channels()` and `select_ica_artifacts()` (mark
+   bad channels; fit ICA and pick artifact components - for every
+   subject), are called automatically by the notebook below.
 5. **`analysis/cortical_analysis.ipynb`** - open this in Jupyter and run
-   the cells top to bottom. The second cell runs
-   `e.preprocess_all_subjects()`: it loops over every subject
-   automatically - `make_bad_channels_selection()` and `make_ica_selection()`
-   each open a plot and pause until you close it, so the loop advances
-   to the next subject the moment you're done with the current one,
-   nothing to edit or re-run by hand. Results are cached per subject,
-   so this is a no-op once a subject is already done, safe to leave in
-   and just click through every time you run the notebook.
+   the cells top to bottom. The next two cells run `e.mark_bad_channels('all')`
+   and then `e.select_ica_artifacts('all')` - one function per step, so
+   it's clear at a glance which one you're running. Each loops over
+   every subject automatically - `make_bad_channels_selection()` and
+   `make_ica_selection()` each open a plot and pause until you close
+   it, so the loop advances to the next subject the moment you're done
+   with the current one, nothing to edit or re-run by hand. Results
+   are cached per subject, so this is a no-op once a subject is
+   already done, safe to leave in and just click through every time
+   you run the notebook. Pass a single subject instead of `'all'`
+   (e.g. `e.mark_bad_channels(1)`) - the same convention `load_trfs()`
+   uses further down - to redo just one subject.
 
    Bad channels can be marked automatically instead, skipping that one
    window:
-   `e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3)`.
+   `e.mark_bad_channels('all', manual_bad_channels=False, auto_bad_channels_r=0.3)`.
    This uses the same neighbor-correlation computation behind the GUI's
    "Neighbor corr" scalp maps to mark any channel correlating with its
    neighbors below `0.3` as bad, with no GUI for that step. Leave the
@@ -139,7 +144,7 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    than aborting the whole subject.
 
    ICA component selection can be automated the same way:
-   `e.preprocess_all_subjects(manual_ica=False, auto_ica_confidence=0.75)`.
+   `e.select_ica_artifacts('all', manual_ica=False, auto_ica_confidence=0.75)`.
    This runs [mne-icalabel](https://github.com/mne-tools/mne-icalabel)'s
    ICLabel classifier on every component and excludes any predicted as
    eye blink / muscle artifact / heart beat / line noise / channel noise
@@ -154,20 +159,23 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
        labeled the same way as the `.tsv` (excluded ones in red), so you
        can sanity-check the automatic call by eye against the numbers.
 
-   Both bad-channel and ICA methods can be mixed freely (e.g. automatic
-   bad channels with manual ICA, or both automatic). Leave both `manual_*`
-   arguments out (the default) to do everything by hand, as before.
+   Since bad channels and ICA are now two separate function calls, mix
+   and match freely by choosing `manual_bad_channels`/`manual_ica`
+   independently in each cell (e.g. automatic bad channels, manual ICA,
+   or both automatic). Leave both arguments out (the default) to do
+   everything by hand, as before.
 
    The rest of the notebook is the actual analysis: envelope model
    checks, the dichotic ear-of-presentation comparison, the
    binaural-cue comparison, and TRF/peak-time plots.
 
-If you'd rather do the bad-channel/ICA step on its own, separately
+If you'd rather do the bad-channel/ICA steps on their own, separately
 from the analysis notebook, open a Python session, `from experiment
-import e`, then call `e.preprocess_all_subjects()` yourself - it's the
-same method, just called by hand instead of from the notebook's cell.
-Exact eelbrain method names in `preprocess_all_subjects()` can vary
-slightly by version; see
+import e`, then call `e.mark_bad_channels('all')` and/or
+`e.select_ica_artifacts('all')` yourself - they're the same methods,
+just called by hand instead of from the notebook's cells. Exact
+eelbrain method names these call internally can vary slightly by
+version; see
 https://eelbrain.readthedocs.io/en/stable/experiment.html for the
 current API.
 

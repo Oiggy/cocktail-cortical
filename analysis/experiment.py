@@ -11,12 +11,13 @@ What this file is for
   asks that object for what it needs (e.g. "give me the cleaned EEG
   for the diotic condition"), instead of repeating all of this setup
   itself. Importing this file never launches anything interactive.
-- The one interactive step this project needs (marking bad channels
-  and picking ICA artifact components, once per subject) is
-  `preprocess_all_subjects()` below. It's called automatically as the
-  second cell of analysis/cortical_analysis.ipynb - you don't need to
-  call it yourself, but you can (`e.preprocess_all_subjects()`, from
-  any Python session) if you ever want to do that step on its own.
+- The two interactive steps this project needs, once per subject, are
+  `mark_bad_channels()` and `select_ica_artifacts()` below. Both are
+  called automatically near the start of
+  analysis/cortical_analysis.ipynb - you don't need to call them
+  yourself, but you can (`e.mark_bad_channels('all')` /
+  `e.select_ica_artifacts('all')`, from any Python session) if you
+  ever want to do either step on its own.
 
 This uses eelbrain's own `Pipeline` class directly (its in-development
 BIDS support), not the `trftools` package. `trftools`'s published code
@@ -51,11 +52,12 @@ What runs, top to bottom, the moment this file is imported
       re-referencing, removing eye-blink artifacts with ICA). See the
       numbered comments on this dict for exactly where the two
       interactive steps below plug in.
-    - preprocess_all_subjects(): loops over every subject and runs the
-      two interactive steps `raw` depends on (mark bad channels, pick
-      ICA artifact components). This is a method, not a script, so it
-      only runs when something calls it - see "What this file is for"
-      above for where that happens.
+    - mark_bad_channels() / select_ica_artifacts(): each loops over one
+      or every subject and runs one of the two interactive steps `raw`
+      depends on (mark bad channels; pick ICA artifact components).
+      These are methods, not scripts, so they only run when something
+      calls them - see "What this file is for" above for where that
+      happens.
     - label_events: how to figure out, from the trigger codes in the
       recording, which condition and which stimulus each segment was.
     - epochs: which time windows of EEG to extract, and how to split
@@ -140,7 +142,7 @@ MONTAGE = mne.channels.read_custom_montage('biosemi64mod.txt')
 # mne-icalabel's ICLabel classifier assigns each ICA component one of
 # these categories. "brain" and "other" are always kept; every other
 # category is a candidate for automatic rejection in
-# preprocess_all_subjects() below (see auto_ica_confidence there).
+# select_ica_artifacts() below (see auto_ica_confidence there).
 ICA_ARTIFACT_LABELS = ('eye blink', 'muscle artifact', 'heart beat', 'line noise', 'channel noise')
 
 # Which speaker (male/female) was the foreground story in each of the 12
@@ -174,9 +176,9 @@ class BinauralCocktail(Pipeline):
     # The preprocessing steps applied to the raw EEG, each one building on
     # the previous. This dict only describes *how* to compute each stage -
     # two of the stages below (1 and 4) also need a human to look at a
-    # plot and click, which happens by calling preprocess_all_subjects()
-    # below, not by anything written in this dict itself. For full
-    # details on the raw-processing pipeline see
+    # plot and click, which happens by calling mark_bad_channels() /
+    # select_ica_artifacts() below, not by anything written in this dict
+    # itself. For full details on the raw-processing pipeline see
     # https://eelbrain.readthedocs.io/en/stable/experiment.html
     raw = {
         # STEP 1 - load the recording. Pipeline finds each subject's raw
@@ -191,7 +193,7 @@ class BinauralCocktail(Pipeline):
         # moment this stage loads - not because this dict says so, but
         # because RawSource always checks for a per-subject
         # bad-channels file first. That file is created by
-        # preprocess_all_subjects() below, either interactively
+        # mark_bad_channels() below, either interactively
         # (make_bad_channels_selection()) or automatically
         # (make_bad_channels_neighbor_correlation()) depending on how
         # it's called. Every stage below inherits whatever gets
@@ -213,7 +215,7 @@ class BinauralCocktail(Pipeline):
         #
         # The fitting and the human component selection both happen by
         # running `e.make_ica_selection()`, which
-        # preprocess_all_subjects() below also calls for you - the
+        # select_ica_artifacts() below also calls for you - the
         # first time it runs for a subject, this line's RawICA(...) is
         # what actually gets fit; the selection you make is then
         # cached and reused automatically by every later request for
@@ -241,30 +243,49 @@ class BinauralCocktail(Pipeline):
         'boosting': Boosting(basis=0.050, error='l1', partitions=-4, selective_stopping=1),
     }
 
-    def preprocess_all_subjects(
-            self, skip=(),
+    def _resolve_subjects(self, subjects, skip=()):
+        """Turn a `mark_bad_channels()`/`select_ica_artifacts()` `subjects`
+        argument into the list of subject names to loop over.
+
+        subjects
+            'all' to go through every subject in the dataset (Pipeline's
+            own subject values, as found in the BIDS dataset - plain
+            "01", "02", ... , no "sub-" prefix), same as `load_trfs()`.
+            Otherwise a single subject, e.g. 1 or '01' - normalized to
+            that same zero-padded, two-digit form.
+        skip
+            Only relevant when subjects='all' - subject names to leave
+            out of the loop (to resume partway through).
+        """
+        if subjects == 'all':
+            return [s for s in self.get_field_values('subject') if s not in skip]
+        return [f'{int(subjects):02d}']
+
+    def mark_bad_channels(
+            self, subjects='all', skip=(),
             auto_bad_channels_r=False, manual_bad_channels=True, redo_bad_channels=False,
-            auto_ica_confidence=False, manual_ica=True, auto_ica_reject_labels=ICA_ARTIFACT_LABELS,
     ):
-        """Run the interactive part of steps 1 and 4 of `raw`, for every subject.
+        """Run the interactive part of step 1 of `raw` (mark bad channels).
 
-        `raw` above only describes *how* to compute each stage; steps 1
-        and 4 also need a human to look at a plot and click (marking
-        bad channels, then picking which ICA components are artifacts).
-        This method is what actually walks through every subject and
-        asks for that input, one subject at a time.
+        `raw` above only describes *how* to compute each stage; step 1
+        also needs a human to look at a plot and click, marking bad
+        channels. This method is what actually walks through one
+        subject, or every subject, and asks for that input.
 
-        Both make_bad_channels_selection() and make_ica_selection() open
-        a plot; the gui.run() call right after each one is what actually
-        pauses execution until you close that window, so this loop
-        advances to the next subject automatically the moment you're
-        done with the current one - there's nothing else to run or edit
-        by hand.
+        make_bad_channels_selection() opens a plot; the gui.run() call
+        right after it is what actually pauses execution until you
+        close that window, so a `subjects='all'` loop advances to the
+        next subject automatically the moment you're done with the
+        current one - there's nothing else to run or edit by hand.
 
-        Results are cached per subject (see steps 1 and 4 above), so a
-        subject that's already done is never reprocessed. Pass
-        `skip=['01', ...]` to explicitly resume partway through.
+        Results are cached per subject (see step 1 above), so a subject
+        that's already done is never reprocessed. Pass `skip=['01', ...]`
+        to explicitly resume partway through a `subjects='all'` loop.
 
+        subjects
+            'all' (default) to go through every subject, or a single
+            subject (e.g. 1 or '01') to do just that one - same
+            convention as `load_trfs()`'s first argument.
         manual_bad_channels
             True (default): mark bad channels by hand, in the GUI.
         auto_bad_channels_r
@@ -298,57 +319,21 @@ class BinauralCocktail(Pipeline):
             first, so the check starts fresh from the full channel set
             every time - the same starting point gives the same result
             every time, instead of drifting further with each re-run.
-        manual_ica
-            True (default): pick ICA artifact components by hand, in
-            the GUI.
-        auto_ica_confidence
-            Confidence threshold (e.g. 0.75) for finding artifact
-            components automatically instead - only used when
-            `manual_ica` is False. Runs mne-icalabel's ICLabel
-            classifier on each component and marks it excluded if its
-            predicted category is in `auto_ica_reject_labels` with at
-            least this much confidence. See _auto_select_ica() for
-            exactly what this computes and writes.
-        auto_ica_reject_labels
-            Which ICLabel categories count as "reject" for
-            auto_ica_confidence above. Defaults to every artifact
-            category ICA_ARTIFACT_LABELS defines near the top of this
-            file (eye blink, muscle artifact, heart beat, line noise,
-            channel noise) - "brain" and "other" are never
-            auto-rejected.
 
-        Four combinations, mixing and matching bad-channel and ICA
-        methods freely:
-            e.preprocess_all_subjects()                                                   # both by hand (default)
-            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3)  # bad channels automatic, ICA by hand
-            e.preprocess_all_subjects(manual_ica=False, auto_ica_confidence=0.75)          # bad channels by hand, ICA automatic
-            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3,
-                                       manual_ica=False, auto_ica_confidence=0.75)          # both automatic
-        Re-running the automatic bad-channel check from a clean slate
-        instead of adding to a previous run:
-            e.preprocess_all_subjects(manual_bad_channels=False, auto_bad_channels_r=0.3, redo_bad_channels=True)
+        Examples:
+            e.mark_bad_channels('all')                                                 # by hand (default)
+            e.mark_bad_channels('all', manual_bad_channels=False, auto_bad_channels_r=0.3)  # automatic
+            e.mark_bad_channels('all', manual_bad_channels=False, auto_bad_channels_r=0.3,
+                                 redo_bad_channels=True)                                # automatic, from a clean slate
+            e.mark_bad_channels(1)                                                     # just one subject, by hand
         """
         if not manual_bad_channels and auto_bad_channels_r is False:
             raise ValueError(
                 "manual_bad_channels=False needs a real auto_bad_channels_r "
                 "threshold (e.g. 0.3), not the default False."
             )
-        if not manual_ica and auto_ica_confidence is False:
-            raise ValueError(
-                "manual_ica=False needs a real auto_ica_confidence "
-                "threshold (e.g. 0.75), not the default False."
-            )
 
-        # Pipeline's own subject values, as found in the BIDS dataset -
-        # plain "01", "02", ... (no "sub-" prefix; that prefix is only
-        # part of the folder/file names on disk, not the subject field
-        # value itself).
-        subjects = self.get_field_values('subject')
-
-        for subject in subjects:
-            if subject in skip:
-                continue
-
+        for subject in self._resolve_subjects(subjects, skip):
             print(f"\n=== {subject} ===")
             self.set(subject=subject)
             if manual_bad_channels:
@@ -374,6 +359,70 @@ class BinauralCocktail(Pipeline):
                 )
                 print(f"  bad channels (r < {auto_bad_channels_r}): {bad_channels or 'none'}")
 
+        print("\nDone. Bad channels marked.")
+
+    def select_ica_artifacts(
+            self, subjects='all', skip=(),
+            auto_ica_confidence=False, manual_ica=True, auto_ica_reject_labels=ICA_ARTIFACT_LABELS,
+    ):
+        """Run the interactive part of step 4 of `raw` (fit ICA, pick artifacts).
+
+        `raw` above only describes *how* to compute each stage; step 4
+        also needs a human to look at a plot and click, picking which
+        ICA components are artifacts. This method is what actually
+        walks through one subject, or every subject, and asks for that
+        input - fitting ICA along the way if it hasn't been fit yet.
+
+        make_ica_selection() opens a plot; the gui.run() call right
+        after it is what actually pauses execution until you close that
+        window, so a `subjects='all'` loop advances to the next subject
+        automatically the moment you're done with the current one -
+        there's nothing else to run or edit by hand.
+
+        Results are cached per subject (see step 4 above), so a subject
+        that's already done is never reprocessed. Pass `skip=['01', ...]`
+        to explicitly resume partway through a `subjects='all'` loop.
+
+        Run this after mark_bad_channels() - ICA is fit on top of
+        whichever channels that step already excluded.
+
+        subjects
+            'all' (default) to go through every subject, or a single
+            subject (e.g. 1 or '01') to do just that one - same
+            convention as `load_trfs()`'s first argument.
+        manual_ica
+            True (default): pick ICA artifact components by hand, in
+            the GUI.
+        auto_ica_confidence
+            Confidence threshold (e.g. 0.75) for finding artifact
+            components automatically instead - only used when
+            `manual_ica` is False. Runs mne-icalabel's ICLabel
+            classifier on each component and marks it excluded if its
+            predicted category is in `auto_ica_reject_labels` with at
+            least this much confidence. See _auto_select_ica() for
+            exactly what this computes and writes.
+        auto_ica_reject_labels
+            Which ICLabel categories count as "reject" for
+            auto_ica_confidence above. Defaults to every artifact
+            category ICA_ARTIFACT_LABELS defines near the top of this
+            file (eye blink, muscle artifact, heart beat, line noise,
+            channel noise) - "brain" and "other" are never
+            auto-rejected.
+
+        Examples:
+            e.select_ica_artifacts('all')                                              # by hand (default)
+            e.select_ica_artifacts('all', manual_ica=False, auto_ica_confidence=0.75)   # automatic
+            e.select_ica_artifacts(1)                                                   # just one subject, by hand
+        """
+        if not manual_ica and auto_ica_confidence is False:
+            raise ValueError(
+                "manual_ica=False needs a real auto_ica_confidence "
+                "threshold (e.g. 0.75), not the default False."
+            )
+
+        for subject in self._resolve_subjects(subjects, skip):
+            print(f"\n=== {subject} ===")
+            self.set(subject=subject)
             if manual_ica:
                 # raw='ica' points this at the 'ica' stage in `raw`
                 # above (the one built with RawICA) - without it, this
@@ -385,7 +434,7 @@ class BinauralCocktail(Pipeline):
             else:
                 self._auto_select_ica(auto_ica_confidence, auto_ica_reject_labels)
 
-        print("\nDone. Every subject has bad channels marked and ICA fit.")
+        print("\nDone. ICA fit and artifact components selected.")
 
     def _safe_bad_channels_neighbor_correlation(self, r, epoch=None):
         """Same algorithm as eelbrain's own make_bad_channels_neighbor_correlation(),
@@ -432,7 +481,7 @@ class BinauralCocktail(Pipeline):
         """Classify this subject's ICA components with mne-icalabel and mark
         artifacts excluded automatically, instead of picking them by hand in
         the GUI (see the auto_ica_confidence parameter of
-        preprocess_all_subjects() above, which calls this).
+        select_ica_artifacts() above, which calls this).
 
         Writes the same things a human reviewer needs to sanity-check the
         result, saved next to this subject's other preprocessing files
