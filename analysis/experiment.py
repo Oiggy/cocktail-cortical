@@ -79,6 +79,7 @@ from eelbrain._experiment.derivative_cache.base import ProtectedArtifactError
 from matplotlib.ticker import PercentFormatter
 import mne
 from pathlib import Path
+import re
 
 # The dataset lives outside this repo, in a sibling "dataset/cocktail"
 # folder next to it. Working this out from this file's own location
@@ -835,7 +836,44 @@ class BinauralCocktail(Pipeline):
 e = BinauralCocktail(DATA_ROOT)
 
 
-def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, **topo_args):
+def _bids_value(s):
+    """Turn an arbitrary string into a BIDS-legal entity value.
+
+    BIDS entity values may only contain letters and digits - no spaces,
+    hyphens, underscores, '+', '~', etc. (all of which show up in
+    predictor formulas like "gammatone-1 + bg~gammatone-1"). Used by
+    _topomap_figure_path() below to fold a `condition`/`predictor`
+    string into a filename safely.
+    """
+    return re.sub(r'[^A-Za-z0-9]', '', s)
+
+
+def _topomap_figure_path(label, scope, condition, predictor):
+    """Where topomap_with_colorbar()/topomap_by_subject_with_colorbar()
+    save their figure.
+
+    Follows BIDS-Derivatives convention: a figure that isn't any one
+    subject's data (a group average, or - as here - a single image
+    already covering every subject) has no `sub-` entity and lives
+    directly under derivatives/<pipeline>/figures/. `condition` and
+    `predictor` aren't official BIDS entities (BIDS has none for this),
+    so they're added as project-specific `epoch-`/`pred-` entities,
+    which BIDS permits; `scope` (e.g. "GroupAvg" vs. "AllSubjects")
+    only distinguishes the two plot functions from each other, folded
+    into `desc-` alongside the metric label.
+    """
+    out_dir = Path(DATA_ROOT) / 'derivatives' / 'eelbrain' / 'figures'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    parts = ['task-cocktail']
+    if condition is not None:
+        parts.append(f'epoch-{_bids_value(condition)}')
+    if predictor is not None:
+        parts.append(f'pred-{_bids_value(predictor)}')
+    parts.append(f'desc-{_bids_value(label)}{scope}')
+    return out_dir / ('_'.join(parts) + '_topomap.png')
+
+
+def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, predictor=None, save=True, **topo_args):
     """One topomap image (group average across subjects), with its
     colorbar embedded in the same figure - not a separate plot - and
     the plotted value, averaged across subjects and sensors, shown in
@@ -844,9 +882,10 @@ def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, **topo_
     y
         Column in `data` to plot (e.g. 'ev', 'r').
     label
-        Display name for `y`, used in the title and colorbar (defaults
-        to `y` itself) - e.g. pass label='exp' for the 'ev' proportion-
-        explained column, which is conventionally shortened to "exp".
+        Display name for `y`, used in the title, colorbar, and saved
+        filename (defaults to `y` itself) - e.g. pass label='exp' for
+        the 'ev' proportion-explained column, which is conventionally
+        shortened to "exp".
     pct
         True (default): the value is a fraction (like 'ev', proportion
         of variance explained) - show it, and the colorbar, as a
@@ -854,9 +893,19 @@ def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, **topo_
         correlation) - show it as a plain number instead.
     condition
         Name of whatever this plot's condition/epoch is (e.g.
-        'diotic'), prepended to the title - so when a loop produces one
-        of these images per condition, each one is still identifiable
-        by its title alone, without needing to track print order.
+        'diotic'). Prepended to the title, and folded into the saved
+        filename as an `epoch-` entity - so when a loop produces one of
+        these images per condition, each one is still identifiable by
+        its title and filename alone, without needing to track print
+        order.
+    predictor
+        The predictor/model formula this data was fit with (e.g.
+        'gammatone-1', the same string passed to load_trfs()). Only
+        affects the saved filename, as a `pred-` entity - not shown in
+        the title, which already gets long enough with the value.
+    save
+        True (default): save this figure - see _topomap_figure_path()
+        for exactly where. False: just display it, save nothing.
     """
     label = y if label is None else label
     mean_value = float(data[y].mean(('case', 'sensor')))
@@ -871,22 +920,25 @@ def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, **topo_
     cb.set_ticks([vmin, 0, vmax])
     if pct:
         cb.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))
+    if save:
+        p.save(_topomap_figure_path(label, 'GroupAvg', condition, predictor))
     return p
 
 
-def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, condition=None, **topo_args):
+def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, condition=None, predictor=None, save=True, **topo_args):
     """One topomap image per subject, all in a single figure with one
     shared colorbar embedded in it - not a separate plot - and each
     subject's value, averaged across sensors, shown in their own title.
 
-    y, label, pct
+    y, label, pct, predictor, save
         See topomap_with_colorbar() above.
     condition
         Name of whatever this plot's condition/epoch is (e.g.
-        'diotic'), shown as the whole figure's own title, above the
-        per-subject titles - so when a loop produces one of these
-        images per condition, each one is still identifiable by its
-        title alone, without needing to track print order.
+        'diotic'). Shown as the whole figure's own title, above the
+        per-subject titles, and folded into the saved filename as an
+        `epoch-` entity - so when a loop produces one of these images
+        per condition, each one is still identifiable by its title and
+        filename alone, without needing to track print order.
 
     Assumes Topomap lays out subjects in the same order they appear in
     `data` (true for 'all' subjects - the order load_trfs() already
@@ -908,4 +960,6 @@ def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, condition=No
     cb.set_ticks([vmin, 0, vmax])
     if pct:
         cb.ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))
+    if save:
+        p.save(_topomap_figure_path(label, 'AllSubjects', condition, predictor))
     return p

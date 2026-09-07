@@ -194,6 +194,21 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    checks, the dichotic ear-of-presentation comparison, the
    binaural-cue comparison, and TRF/peak-time plots.
 
+   The envelope-model topomaps use two helpers from `experiment.py`,
+   `topomap_with_colorbar()` and `topomap_by_subject_with_colorbar()`
+   - a topomap with its colorbar embedded in the same figure (not a
+   separate plot_colorbar() window), and the plotted value in the
+   title. Both save their figure by default under
+   `bids/derivatives/eelbrain/figures/` (no `sub-` entity, since
+   neither is one subject's data - one shows the group average, the
+   other every subject side by side in a single image), following
+   BIDS-Derivatives convention for group-level figures. The predictor
+   model and listening condition, when given, are folded into the
+   filename as `pred-`/`epoch-` entities (not official BIDS entities -
+   BIDS has none for this - but permitted as project-specific ones),
+   e.g. `task-cocktail_epoch-diotic_pred-gammatone1bggammatone1_desc-expGroupAvg_topomap.png`.
+   Pass `save=False` to display without writing a file.
+
 If you'd rather do the bad-channel/ICA steps on their own, separately
 from the analysis notebook, open a Python session, `from experiment
 import e`, then call `e.mark_bad_channels('all')` and/or
