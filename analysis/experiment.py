@@ -261,9 +261,35 @@ class BinauralCocktail(Pipeline):
             return [s for s in self.get_field_values('subject') if s not in skip]
         return [f'{int(subjects):02d}']
 
+    def _subject_deriv_dir(self, subject):
+        """Where mark_bad_channels()/select_ica_artifacts() write this
+        subject's files - `derivatives/mne/sub-XX/eeg/`, same folder
+        _auto_select_ica() below writes its .tsv/.png to."""
+        return Path(DATA_ROOT) / 'derivatives' / 'mne' / f'sub-{subject}' / 'eeg'
+
+    def _confirm_overwrite(self, subject, description, existing_path):
+        """Ask whether to redo a step that already has saved output for this
+        subject, instead of silently skipping it or silently redoing it.
+
+        Used by mark_bad_channels() and select_ica_artifacts() when
+        `confirm_overwrite=True` (the default) and this subject's file
+        from a previous run is found on disk. Typing anything other than
+        'r' - including just pressing enter - skips the subject, since
+        skipping (keeping existing results) is the safer default than
+        accidentally overwriting a manually-reviewed selection.
+
+        Returns True to proceed (overwrite), False to skip this subject.
+        """
+        answer = input(
+            f"  {subject}: {description} already exists ({existing_path.name}). "
+            f"Skip (default) or redo and overwrite? [s/r]: "
+        ).strip().lower()
+        return answer == 'r'
+
     def mark_bad_channels(
             self, subjects='all', skip=(),
             auto_bad_channels_r=False, manual_bad_channels=True, redo_bad_channels=False,
+            confirm_overwrite=True,
     ):
         """Run the interactive part of step 1 of `raw` (mark bad channels).
 
@@ -278,14 +304,29 @@ class BinauralCocktail(Pipeline):
         next subject automatically the moment you're done with the
         current one - there's nothing else to run or edit by hand.
 
-        Results are cached per subject (see step 1 above), so a subject
-        that's already done is never reprocessed. Pass `skip=['01', ...]`
-        to explicitly resume partway through a `subjects='all'` loop.
+        Before doing anything for a subject, this checks whether that
+        subject's channels.tsv already exists under
+        `derivatives/mne/sub-XX/eeg/` (i.e. this step has already been
+        run for them at least once). If it has, and `confirm_overwrite`
+        is True (the default), it asks - via a plain text prompt, not a
+        GUI - whether to skip that subject or redo it and overwrite
+        whatever is there. See confirm_overwrite below. Pass
+        `skip=['01', ...]` to instead unconditionally skip specific
+        subjects without being asked.
 
         subjects
             'all' (default) to go through every subject, or a single
             subject (e.g. 1 or '01') to do just that one - same
             convention as `load_trfs()`'s first argument.
+        confirm_overwrite
+            True (default): if a subject already has a channels.tsv
+            file, ask before redoing that subject (typing anything
+            other than 'r', including just pressing enter, skips it -
+            skipping is the safer default). False: never ask, always
+            run every requested subject regardless of what's already
+            saved (the old, pre-confirmation behavior) - overwriting
+            automatic results, or re-opening the GUI pre-loaded with
+            whatever was marked before, for manual ones.
         manual_bad_channels
             True (default): mark bad channels by hand, in the GUI.
         auto_bad_channels_r
@@ -326,6 +367,7 @@ class BinauralCocktail(Pipeline):
             e.mark_bad_channels('all', manual_bad_channels=False, auto_bad_channels_r=0.3,
                                  redo_bad_channels=True)                                # automatic, from a clean slate
             e.mark_bad_channels(1)                                                     # just one subject, by hand
+            e.mark_bad_channels('all', confirm_overwrite=False)                        # rerun everyone, no prompts
         """
         if not manual_bad_channels and auto_bad_channels_r is False:
             raise ValueError(
@@ -335,6 +377,12 @@ class BinauralCocktail(Pipeline):
 
         for subject in self._resolve_subjects(subjects, skip):
             print(f"\n=== {subject} ===")
+            if confirm_overwrite:
+                existing = list(self._subject_deriv_dir(subject).glob('*_channels.tsv'))
+                if existing and not self._confirm_overwrite(subject, "bad-channels file", existing[0]):
+                    print(f"  skipping {subject} (already done)")
+                    continue
+
             self.set(subject=subject)
             if manual_bad_channels:
                 self.make_bad_channels_selection()
@@ -364,6 +412,7 @@ class BinauralCocktail(Pipeline):
     def select_ica_artifacts(
             self, subjects='all', skip=(),
             auto_ica_confidence=False, manual_ica=True, auto_ica_reject_labels=ICA_ARTIFACT_LABELS,
+            confirm_overwrite=True,
     ):
         """Run the interactive part of step 4 of `raw` (fit ICA, pick artifacts).
 
@@ -379,9 +428,17 @@ class BinauralCocktail(Pipeline):
         automatically the moment you're done with the current one -
         there's nothing else to run or edit by hand.
 
-        Results are cached per subject (see step 4 above), so a subject
-        that's already done is never reprocessed. Pass `skip=['01', ...]`
-        to explicitly resume partway through a `subjects='all'` loop.
+        Before doing anything for a subject, this checks whether that
+        subject's ICA file already exists under
+        `derivatives/mne/sub-XX/eeg/` (i.e. ICA has already been fit,
+        and - in normal use, since nothing else in this project touches
+        the 'ica' raw stage first - already reviewed for artifacts at
+        least once). If it has, and `confirm_overwrite` is True (the
+        default), it asks - via a plain text prompt, not a GUI -
+        whether to skip that subject or redo it and overwrite whatever
+        is there. See confirm_overwrite below. Pass `skip=['01', ...]`
+        to instead unconditionally skip specific subjects without being
+        asked.
 
         Run this after mark_bad_channels() - ICA is fit on top of
         whichever channels that step already excluded.
@@ -390,6 +447,14 @@ class BinauralCocktail(Pipeline):
             'all' (default) to go through every subject, or a single
             subject (e.g. 1 or '01') to do just that one - same
             convention as `load_trfs()`'s first argument.
+        confirm_overwrite
+            True (default): if a subject already has an ICA file, ask
+            before redoing that subject (typing anything other than
+            'r', including just pressing enter, skips it - skipping is
+            the safer default, since re-fitting and reselecting
+            replaces a possibly manually-reviewed result). False: never
+            ask, always run every requested subject regardless of
+            what's already saved (the old, pre-confirmation behavior).
         manual_ica
             True (default): pick ICA artifact components by hand, in
             the GUI.
@@ -413,6 +478,7 @@ class BinauralCocktail(Pipeline):
             e.select_ica_artifacts('all')                                              # by hand (default)
             e.select_ica_artifacts('all', manual_ica=False, auto_ica_confidence=0.75)   # automatic
             e.select_ica_artifacts(1)                                                   # just one subject, by hand
+            e.select_ica_artifacts('all', confirm_overwrite=False)                      # rerun everyone, no prompts
         """
         if not manual_ica and auto_ica_confidence is False:
             raise ValueError(
@@ -422,6 +488,12 @@ class BinauralCocktail(Pipeline):
 
         for subject in self._resolve_subjects(subjects, skip):
             print(f"\n=== {subject} ===")
+            if confirm_overwrite:
+                existing = list(self._subject_deriv_dir(subject).glob('*_ica.fif'))
+                if existing and not self._confirm_overwrite(subject, "ICA file", existing[0]):
+                    print(f"  skipping {subject} (already done)")
+                    continue
+
             self.set(subject=subject)
             if manual_ica:
                 # raw='ica' points this at the 'ica' stage in `raw`

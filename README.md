@@ -106,12 +106,21 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    every subject automatically - `make_bad_channels_selection()` and
    `make_ica_selection()` each open a plot and pause until you close
    it, so the loop advances to the next subject the moment you're done
-   with the current one, nothing to edit or re-run by hand. Results
-   are cached per subject, so this is a no-op once a subject is
-   already done, safe to leave in and just click through every time
-   you run the notebook. Pass a single subject instead of `'all'`
-   (e.g. `e.mark_bad_channels(1)`) - the same convention `load_trfs()`
-   uses further down - to redo just one subject.
+   with the current one, nothing to edit or re-run by hand. Pass a
+   single subject instead of `'all'` (e.g. `e.mark_bad_channels(1)`) -
+   the same convention `load_trfs()` uses further down - to redo just
+   one subject.
+
+   Before touching a subject, each function checks whether that
+   subject's file (`*_channels.tsv` for bad channels, `*_ica.fif` for
+   ICA) already exists under `derivatives/mne/sub-XX/eeg/`. If it does,
+   it asks in a plain text prompt whether to skip that subject or redo
+   it and overwrite whatever's there - typing anything but `r`
+   (including just pressing enter) skips it, so leaving both cells in
+   and re-running the notebook is safe: already-done subjects just get
+   a one-line prompt to confirm, not the interactive GUI window again.
+   Pass `confirm_overwrite=False` to skip the prompts entirely and
+   always (re)run every requested subject, as before.
 
    Bad channels can be marked automatically instead, skipping that one
    window:
