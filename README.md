@@ -111,16 +111,19 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    the same convention `load_trfs()` uses further down - to redo just
    one subject.
 
-   Before touching a subject, each function checks whether that
-   subject's file (`*_channels.tsv` for bad channels, `*_ica.fif` for
-   ICA) already exists under `derivatives/mne/sub-XX/eeg/`. If it does,
-   it asks in a plain text prompt whether to skip that subject or redo
-   it and overwrite whatever's there - typing anything but `r`
-   (including just pressing enter) skips it, so leaving both cells in
-   and re-running the notebook is safe: already-done subjects just get
-   a one-line prompt to confirm, not the interactive GUI window again.
-   Pass `confirm_overwrite=False` to skip the prompts entirely and
-   always (re)run every requested subject, as before.
+   Before running anyone, each function checks which requested
+   subjects already have a file (`*_channels.tsv` for bad channels,
+   `*_ica.fif` for ICA) under `derivatives/mne/sub-XX/eeg/`. If any do,
+   it asks in a plain text prompt whether to skip or redo them -
+   typing anything but `r` (including just pressing enter) skips.
+   With `'all'`, one combined question covers every already-done
+   subject at once ("skip all of them" / "redo all of them"), not a
+   prompt per subject; with a specific subject (e.g. `e.mark_bad_channels(1)`)
+   it's just about that one. This makes leaving both cells in and
+   re-running the notebook safe: if everyone's already done, you get
+   one quick confirm, not 13 interactive GUI windows. Pass
+   `confirm_overwrite=False` to skip the prompts entirely and always
+   (re)run every requested subject, as before.
 
    Bad channels can be marked automatically instead, skipping that one
    window:

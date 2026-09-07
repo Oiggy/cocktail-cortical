@@ -267,24 +267,60 @@ class BinauralCocktail(Pipeline):
         _auto_select_ica() below writes its .tsv/.png to."""
         return Path(DATA_ROOT) / 'derivatives' / 'mne' / f'sub-{subject}' / 'eeg'
 
-    def _confirm_overwrite(self, subject, description, existing_path):
-        """Ask whether to redo a step that already has saved output for this
-        subject, instead of silently skipping it or silently redoing it.
+    def _filter_already_done(self, subjects_arg, resolved_subjects, glob_pattern, description):
+        """Drop subjects that already have saved output, after asking.
 
         Used by mark_bad_channels() and select_ica_artifacts() when
-        `confirm_overwrite=True` (the default) and this subject's file
-        from a previous run is found on disk. Typing anything other than
-        'r' - including just pressing enter - skips the subject, since
-        skipping (keeping existing results) is the safer default than
-        accidentally overwriting a manually-reviewed selection.
+        `confirm_overwrite=True` (the default), right before their main
+        loop, to decide which of `resolved_subjects` to actually run.
 
-        Returns True to proceed (overwrite), False to skip this subject.
+        Only subjects with a matching file under
+        `derivatives/mne/sub-XX/eeg/` (glob_pattern) are ever in
+        question - a subject with nothing saved yet is always run, no
+        prompt needed.
+
+        The scope of the question matches the scope of the original
+        call, via `subjects_arg` (the raw `subjects` value the caller
+        passed in, before _resolve_subjects() expanded it):
+          - `subjects_arg == 'all'`: one combined question covering
+            every already-done subject in the group at once - "skip
+            all of them" or "redo all of them", not one prompt per
+            subject.
+          - a specific subject: a single, subject-specific question
+            (there is only ever one subject to ask about in that case).
+        Typing anything other than 'r' - including just pressing enter
+        - skips, since skipping (keeping existing results) is the safer
+        default than accidentally overwriting a manually-reviewed
+        selection.
         """
-        answer = input(
-            f"  {subject}: {description} already exists ({existing_path.name}). "
-            f"Skip (default) or redo and overwrite? [s/r]: "
-        ).strip().lower()
-        return answer == 'r'
+        already_done = {
+            s: existing[0]
+            for s in resolved_subjects
+            if (existing := list(self._subject_deriv_dir(s).glob(glob_pattern)))
+        }
+        if not already_done:
+            return resolved_subjects
+
+        if subjects_arg == 'all':
+            names = ', '.join(already_done)
+            answer = input(
+                f"  {description} already exists for: {names}. "
+                f"Skip all of them (default) or redo and overwrite all of them? [s/r]: "
+            ).strip().lower()
+            if answer == 'r':
+                return resolved_subjects
+            print(f"  skipping (already done): {names}")
+            return [s for s in resolved_subjects if s not in already_done]
+        else:
+            subject, existing_path = next(iter(already_done.items()))
+            answer = input(
+                f"  {subject}: {description} already exists ({existing_path.name}). "
+                f"Skip (default) or redo and overwrite? [s/r]: "
+            ).strip().lower()
+            if answer == 'r':
+                return resolved_subjects
+            print(f"  skipping {subject} (already done)")
+            return []
 
     def mark_bad_channels(
             self, subjects='all', skip=(),
@@ -304,24 +340,27 @@ class BinauralCocktail(Pipeline):
         next subject automatically the moment you're done with the
         current one - there's nothing else to run or edit by hand.
 
-        Before doing anything for a subject, this checks whether that
-        subject's channels.tsv already exists under
+        Before running anyone, this checks which of the requested
+        subjects already have a channels.tsv under
         `derivatives/mne/sub-XX/eeg/` (i.e. this step has already been
-        run for them at least once). If it has, and `confirm_overwrite`
+        run for them at least once). If any do, and `confirm_overwrite`
         is True (the default), it asks - via a plain text prompt, not a
-        GUI - whether to skip that subject or redo it and overwrite
-        whatever is there. See confirm_overwrite below. Pass
-        `skip=['01', ...]` to instead unconditionally skip specific
-        subjects without being asked.
+        GUI - whether to skip or redo them. The question's scope
+        matches `subjects`: with `subjects='all'`, one combined question
+        covers every already-done subject at once ("skip all of them"
+        or "redo all of them"), not a prompt per subject; with a
+        specific subject, the question is just about that one. See
+        confirm_overwrite below. Pass `skip=['01', ...]` to instead
+        unconditionally skip specific subjects without being asked.
 
         subjects
             'all' (default) to go through every subject, or a single
             subject (e.g. 1 or '01') to do just that one - same
             convention as `load_trfs()`'s first argument.
         confirm_overwrite
-            True (default): if a subject already has a channels.tsv
-            file, ask before redoing that subject (typing anything
-            other than 'r', including just pressing enter, skips it -
+            True (default): if any requested subject already has a
+            channels.tsv file, ask before redoing them (typing anything
+            other than 'r', including just pressing enter, skips -
             skipping is the safer default). False: never ask, always
             run every requested subject regardless of what's already
             saved (the old, pre-confirmation behavior) - overwriting
@@ -375,14 +414,14 @@ class BinauralCocktail(Pipeline):
                 "threshold (e.g. 0.3), not the default False."
             )
 
-        for subject in self._resolve_subjects(subjects, skip):
-            print(f"\n=== {subject} ===")
-            if confirm_overwrite:
-                existing = list(self._subject_deriv_dir(subject).glob('*_channels.tsv'))
-                if existing and not self._confirm_overwrite(subject, "bad-channels file", existing[0]):
-                    print(f"  skipping {subject} (already done)")
-                    continue
+        subjects_to_run = self._resolve_subjects(subjects, skip)
+        if confirm_overwrite:
+            subjects_to_run = self._filter_already_done(
+                subjects, subjects_to_run, '*_channels.tsv', "bad-channels file",
+            )
 
+        for subject in subjects_to_run:
+            print(f"\n=== {subject} ===")
             self.set(subject=subject)
             if manual_bad_channels:
                 self.make_bad_channels_selection()
@@ -428,17 +467,20 @@ class BinauralCocktail(Pipeline):
         automatically the moment you're done with the current one -
         there's nothing else to run or edit by hand.
 
-        Before doing anything for a subject, this checks whether that
-        subject's ICA file already exists under
+        Before running anyone, this checks which of the requested
+        subjects already have an ICA file under
         `derivatives/mne/sub-XX/eeg/` (i.e. ICA has already been fit,
         and - in normal use, since nothing else in this project touches
         the 'ica' raw stage first - already reviewed for artifacts at
-        least once). If it has, and `confirm_overwrite` is True (the
+        least once). If any do, and `confirm_overwrite` is True (the
         default), it asks - via a plain text prompt, not a GUI -
-        whether to skip that subject or redo it and overwrite whatever
-        is there. See confirm_overwrite below. Pass `skip=['01', ...]`
-        to instead unconditionally skip specific subjects without being
-        asked.
+        whether to skip or redo them. The question's scope matches
+        `subjects`: with `subjects='all'`, one combined question covers
+        every already-done subject at once ("skip all of them" or "redo
+        all of them"), not a prompt per subject; with a specific
+        subject, the question is just about that one. See
+        confirm_overwrite below. Pass `skip=['01', ...]` to instead
+        unconditionally skip specific subjects without being asked.
 
         Run this after mark_bad_channels() - ICA is fit on top of
         whichever channels that step already excluded.
@@ -486,14 +528,14 @@ class BinauralCocktail(Pipeline):
                 "threshold (e.g. 0.75), not the default False."
             )
 
-        for subject in self._resolve_subjects(subjects, skip):
-            print(f"\n=== {subject} ===")
-            if confirm_overwrite:
-                existing = list(self._subject_deriv_dir(subject).glob('*_ica.fif'))
-                if existing and not self._confirm_overwrite(subject, "ICA file", existing[0]):
-                    print(f"  skipping {subject} (already done)")
-                    continue
+        subjects_to_run = self._resolve_subjects(subjects, skip)
+        if confirm_overwrite:
+            subjects_to_run = self._filter_already_done(
+                subjects, subjects_to_run, '*_ica.fif', "ICA file",
+            )
 
+        for subject in subjects_to_run:
+            print(f"\n=== {subject} ===")
             self.set(subject=subject)
             if manual_ica:
                 # raw='ica' points this at the 'ica' stage in `raw`
