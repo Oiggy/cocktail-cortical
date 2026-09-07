@@ -68,7 +68,7 @@ What runs, top to bottom, the moment this file is imported
   ready-to-use pipeline object, `e`, that every analysis script imports.
   This is the only line that produces something other scripts use.
 """
-from eelbrain import Factor, Var, gui
+from eelbrain import Factor, Var, gui, plot
 from eelbrain.pipeline import *
 # Private import: this is the exception eelbrain itself raises when a saved
 # ICA file no longer matches the bad channels (or other raw settings) it was
@@ -76,6 +76,7 @@ from eelbrain.pipeline import *
 # so this could break on a future eelbrain version; if the import ever fails,
 # the fix is to find wherever ProtectedArtifactError lives in that version.
 from eelbrain._experiment.derivative_cache.base import ProtectedArtifactError
+from matplotlib.ticker import PercentFormatter
 import mne
 from pathlib import Path
 
@@ -832,3 +833,65 @@ class BinauralCocktail(Pipeline):
 # Creating the pipeline instance here means other scripts can just do
 # `from experiment import e` instead of repeating this setup.
 e = BinauralCocktail(DATA_ROOT)
+
+
+def topomap_with_colorbar(y, data, label=None, pct=True, **topo_args):
+    """One topomap image (group average across subjects), with its
+    colorbar embedded in the same figure - not a separate plot - and
+    the plotted value, averaged across subjects and sensors, shown in
+    the title.
+
+    y
+        Column in `data` to plot (e.g. 'ev', 'r').
+    label
+        Display name for `y`, used in the title and colorbar (defaults
+        to `y` itself) - e.g. pass label='exp' for the 'ev' proportion-
+        explained column, which is conventionally shortened to "exp".
+    pct
+        True (default): the value is a fraction (like 'ev', proportion
+        of variance explained) - show it, and the colorbar, as a
+        percentage. False: the value already has no unit (like 'r', a
+        correlation) - show it as a plain number instead.
+    """
+    label = y if label is None else label
+    mean_value = float(data[y].mean(('case', 'sensor')))
+    value_str = f"{mean_value:.2%}" if pct else f"{mean_value:.3f}"
+    p = plot.Topomap(y, data=data, title=f"Mean {label}: {value_str}", **topo_args)
+    mappable = p.plots[0].plots[0].im
+    cb = p.figure.colorbar(mappable, ax=p.axes[0], shrink=0.7, label=f'{label} (%)' if pct else label)
+    vmin, vmax = mappable.get_clim()
+    cb.set_ticks([vmin, 0, vmax])
+    if pct:
+        cb.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))
+    return p
+
+
+def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, **topo_args):
+    """One topomap image per subject, all in a single figure with one
+    shared colorbar embedded in it - not a separate plot - and each
+    subject's value, averaged across sensors, shown in their own title.
+
+    y, label, pct
+        See topomap_with_colorbar() above.
+
+    Assumes Topomap lays out subjects in the same order they appear in
+    `data` (true for 'all' subjects - the order load_trfs() already
+    used to build `data`).
+    """
+    label = y if label is None else label
+    values = data[y].mean('sensor').x
+    if pct:
+        titles = [f"{subject}\n{value:.2%}" for subject, value in zip(data['subject'], values)]
+    else:
+        titles = [f"{subject}\n{value:.3f}" for subject, value in zip(data['subject'], values)]
+    p = plot.Topomap(y, 'subject', rows=1, data=data, axtitle=titles, **topo_args)
+    mappable = p.plots[0].plots[0].im
+    cb = p.figure.colorbar(
+        mappable, ax=p.axes, orientation='horizontal', fraction=0.05, pad=0.15,
+        label=f'{label} (%)' if pct else label,
+    )
+    vmin, vmax = mappable.get_clim()
+    cb.set_ticks([vmin, 0, vmax])
+    if pct:
+        cb.ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))
+    return p
