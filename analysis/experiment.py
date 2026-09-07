@@ -214,7 +214,16 @@ class BinauralCocktail(Pipeline):
         # responses to speech are slow, so a 0.5-20 Hz filter keeps the
         # signal of interest while removing slow drift and
         # high-frequency noise.
-        '0.5-20': RawFilter('raw', 0.5, 20, cache=False),
+        #
+        # cache=True: this stage's output (the whole filtered
+        # recording, before re-referencing or ICA) is reused across
+        # every epoch/condition and every predictor model analyzed
+        # against raw='ica' below - none of that depends on this step,
+        # only on which subject it is. Without caching, this exact
+        # filtering is redone from the raw file every single time
+        # anything asks for 'ica' data, even for a condition or
+        # predictor already analyzed moments earlier.
+        '0.5-20': RawFilter('raw', 0.5, 20, cache=True),
         # STEP 3 - re-reference to the two mastoid electrodes (a
         # standard EEG reference choice).
         '0.5-20-mast': RawReReference('0.5-20', ['A1', 'A2']),
@@ -228,7 +237,16 @@ class BinauralCocktail(Pipeline):
         # what actually gets fit; the selection you make is then
         # cached and reused automatically by every later request for
         # the 'ica' stage.
-        'ica': RawICA('0.5-20-mast', fit_kwargs=dict(decim=16)),
+        #
+        # cache=True: same reasoning as step 2 - this stage's output
+        # (the fully cleaned continuous recording: filtered,
+        # re-referenced, ICA artifacts removed) is what every
+        # load_trfs(..., raw='ica', ...) call actually uses, regardless
+        # of which condition or predictor it's for. Caching it means
+        # only the very first request per subject does this work; every
+        # later one - a different epoch, a different predictor, a
+        # different day's session - just loads the saved result.
+        'ica': RawICA('0.5-20-mast', fit_kwargs=dict(decim=16), cache=True),
         # STEP 5 - a wider filter band, for analyses that need more
         # than 0.5-20 Hz.
         '1-40': RawFilter('raw', 1, 40, cache=False),

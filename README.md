@@ -99,6 +99,17 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    methods, `mark_bad_channels()` and `select_ica_artifacts()` (mark
    bad channels; fit ICA and pick artifact components - for every
    subject), are called automatically by the notebook below.
+
+   The `'0.5-20'` and `'ica'` stages in `raw{}` are cached
+   (`cache=True`): the cleaned continuous recording they produce
+   (filtered, re-referenced, ICA artifacts removed) is the same
+   regardless of which condition or predictor model an analysis uses
+   it for, so caching means only the first `load_trfs(..., raw='ica', ...)`
+   call per subject actually redoes that work - every later one, for a
+   different epoch or predictor, loads the saved result instead. This
+   trades disk space (a full copy of each subject's cleaned continuous
+   recording, under `derivatives/mne/sub-XX/eeg/`) for that time
+   saved.
 5. **`analysis/cortical_analysis.ipynb`** - open this in Jupyter and run
    the cells top to bottom. The next two cells run `e.mark_bad_channels('all')`
    and then `e.select_ica_artifacts('all')` - one function per step, so
