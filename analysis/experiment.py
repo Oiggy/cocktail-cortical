@@ -968,7 +968,18 @@ def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, condition=No
         titles = [f"{subject}\n{value:.2%}" for subject, value in zip(data['subject'], values)]
     else:
         titles = [f"{subject}\n{value:.3f}" for subject, value in zip(data['subject'], values)]
-    p = plot.Topomap(y, 'subject', rows=1, data=data, axtitle=titles, title=condition, **topo_args)
+    # Not passing condition as `title=` here: eelbrain draws that title
+    # at a fixed height that doesn't account for the two-line axtitle
+    # (subject + value) sitting right under it in this particular
+    # layout, so with many subjects in a row the two collide (the
+    # condition text lands on top of the middle subject's own title).
+    # Adding it manually as a suptitle, with extra headroom reserved
+    # above whatever eelbrain already allotted, keeps them apart.
+    p = plot.Topomap(y, 'subject', rows=1, data=data, axtitle=titles, **topo_args)
+    if condition is not None:
+        top = p.figure.subplotpars.top
+        p.figure.subplots_adjust(top=top - 0.1)
+        p.figure.suptitle(condition, y=top + 0.03)
     mappable = p.plots[0].plots[0].im
     cb = p.figure.colorbar(
         mappable, ax=p.axes, orientation='horizontal', fraction=0.05, pad=0.15,
