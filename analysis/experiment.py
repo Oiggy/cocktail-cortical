@@ -995,7 +995,7 @@ def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, condition=No
         fig.set_size_inches(width, new_height)
         new_top = old_height * old_top / new_height
         fig.subplots_adjust(top=new_top)
-        fig.suptitle(condition, y=(new_top + 1) / 2)
+        fig.suptitle(condition, y=new_top + (1 - new_top) * 0.85, fontsize=13, fontweight='bold')
     mappable = p.plots[0].plots[0].im
     cb = p.figure.colorbar(
         mappable, ax=p.axes, orientation='horizontal', fraction=0.05, pad=0.15,
