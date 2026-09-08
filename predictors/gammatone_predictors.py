@@ -36,9 +36,20 @@ STIMULUS_DIR = DATA_ROOT / "stimuli"
 # has to match that exactly.
 PREDICTOR_DIR = DATA_ROOT / "bids" / "derivatives" / "predictors"
 
-# The 24 audio stimuli used in the experiment: 12 recordings from a male
-# speaker, 12 from a female speaker.
-STIMULI = [f"{speaker}_{i}" for speaker in ["male", "female"] for i in range(1, 13)]
+# The audio stimuli used in the experiment:
+#   - 24 single-speaker recordings: 12 from a male speaker, 12 from a
+#     female speaker (fg/bg terms in experiment.py's label_events()
+#     use these).
+#   - 24 pre-mixed recordings, "List_<list_id>_stim_<i>" for list_id in
+#     1-2 and i in 1-12 - the combined foreground+background audio for
+#     each segment (the mix term label_events() defines; the two
+#     "clean", no-background segments per list still get a predictor
+#     built here even though label_events() never references them as
+#     'mix', for consistency - it's just unused, not wrong).
+STIMULI = (
+    [f"{speaker}_{i}" for speaker in ["male", "female"] for i in range(1, 13)]
+    + [f"List_{list_id}_stim_{i}" for list_id in (1, 2) for i in range(1, 13)]
+)
 
 # --- Step 1: turn each sound file into a gammatone spectrogram ---
 for stimulus in STIMULI:
