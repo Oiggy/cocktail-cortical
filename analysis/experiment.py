@@ -969,17 +969,33 @@ def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, condition=No
     else:
         titles = [f"{subject}\n{value:.3f}" for subject, value in zip(data['subject'], values)]
     # Not passing condition as `title=` here: eelbrain draws that title
-    # at a fixed height that doesn't account for the two-line axtitle
-    # (subject + value) sitting right under it in this particular
-    # layout, so with many subjects in a row the two collide (the
-    # condition text lands on top of the middle subject's own title).
-    # Adding it manually as a suptitle, with extra headroom reserved
-    # above whatever eelbrain already allotted, keeps them apart.
+    # at a height based on the figure's *fraction*, which doesn't
+    # account for the two-line axtitle (subject + value) sitting right
+    # under it - and this figure (one short row of many subjects) is
+    # physically short, so a fraction of its height is a tiny amount of
+    # real space, nowhere near enough to clear that title. A fixed
+    # fractional offset (tried first) failed for the same reason.
+    #
+    # Fix: grow the actual canvas by a fixed number of real inches, and
+    # hand that whole new strip to the condition title. Growing the
+    # figure without touching subplotpars.top would just stretch
+    # everything proportionally (mostly enlarging the topomaps, barely
+    # the margin) - shrinking `top` afterwards, by exactly the fraction
+    # the new height represents, keeps the existing content (topomaps +
+    # their titles) at the same absolute size it already had, so the
+    # added inches become entirely new, guaranteed-empty space at the
+    # top, regardless of how tall or short this particular figure is.
     p = plot.Topomap(y, 'subject', rows=1, data=data, axtitle=titles, **topo_args)
     if condition is not None:
-        top = p.figure.subplotpars.top
-        p.figure.subplots_adjust(top=top - 0.1)
-        p.figure.suptitle(condition, y=top + 0.03)
+        fig = p.figure
+        width, old_height = fig.get_size_inches()
+        old_top = fig.subplotpars.top
+        extra_inches = 0.8
+        new_height = old_height + extra_inches
+        fig.set_size_inches(width, new_height)
+        new_top = old_height * old_top / new_height
+        fig.subplots_adjust(top=new_top)
+        fig.suptitle(condition, y=(new_top + 1) / 2)
     mappable = p.plots[0].plots[0].im
     cb = p.figure.colorbar(
         mappable, ax=p.axes, orientation='horizontal', fraction=0.05, pad=0.15,
