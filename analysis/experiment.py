@@ -102,6 +102,13 @@ import re
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = str(REPO_ROOT.parent / "dataset" / "cocktail" / "bids")
 
+# Where every figure this project saves lives: BIDS-Derivatives
+# convention for a group-level figure (not any one subject's data) -
+# no `sub-` entity, directly under derivatives/<pipeline>/figures/.
+# Exported so the notebook can save its own plots (ROI map, TRFs) here
+# too, instead of somewhere outside the dataset (e.g. the Desktop).
+FIGURES_DIR = Path(DATA_ROOT) / 'derivatives' / 'eelbrain' / 'figures'
+
 # Each audio stimulus has a different length. This tells the pipeline how
 # long to make the EEG segment ("epoch") for each one.
 SEGMENT_DURATION = {
@@ -880,7 +887,7 @@ def _topomap_figure_path(label, scope, condition, predictor):
     only distinguishes the two plot functions from each other, folded
     into `desc-` alongside the metric label.
     """
-    out_dir = Path(DATA_ROOT) / 'derivatives' / 'eelbrain' / 'figures'
+    out_dir = FIGURES_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     parts = ['task-cocktail']
     if condition is not None:
