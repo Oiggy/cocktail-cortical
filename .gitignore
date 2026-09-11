@@ -39,9 +39,11 @@ coverage/
 .pytest_cache/
 doc/auto_examples
 *.ipynb
-# The committed exception: the actual notebook for the main analysis,
-# not jupytext's paired byproduct.
+# The committed exception: the actual notebooks for the main analysis
+# and the Brodbeck et al. 2020 replication, not jupytext's paired
+# byproduct.
 !analysis/cortical_analysis.ipynb
+!analysis/cortical_analysis_2.ipynb
 .ipynb_checkpoints
 
 # Data is not tracked in git - it lives in a sibling dataset/cocktail
