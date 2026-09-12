@@ -68,7 +68,7 @@ What runs, top to bottom, the moment this file is imported
   ready-to-use pipeline object, `e`, that every analysis script imports.
   This is the only line that produces something other scripts use.
 """
-from eelbrain import Factor, Var, gui, plot
+from eelbrain import Factor, NDVar, Var, gui, plot
 from eelbrain.pipeline import *
 # Private import: this is the exception eelbrain itself raises when a saved
 # ICA file no longer matches the bad channels (or other raw settings) it was
@@ -898,14 +898,23 @@ def _topomap_figure_path(label, scope, condition, predictor):
     return out_dir / ('_'.join(parts) + '_topomap.png')
 
 
-def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, predictor=None, save=True, **topo_args):
+def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, predictor=None, save=True,
+                           colorbar_side='right', colorbar_label=True, **topo_args):
     """One topomap image (group average across subjects), with its
     colorbar embedded in the same figure - not a separate plot - and
     the plotted value, averaged across subjects and sensors, shown in
     the title.
 
     y
-        Column in `data` to plot (e.g. 'ev', 'r').
+        Column in `data` to plot (e.g. 'ev', 'r'). Ignored (pass `None`)
+        when `data` is already a bare NDVar - see `data` below.
+    data
+        The usual case: a Dataset with one row per subject, `y` naming
+        the column to average across subjects and plot. Alternatively,
+        a single NDVar that already *is* the map to plot, with no
+        further per-subject averaging needed - e.g.
+        `result.masked_parameter_map()`, a significance-masked group
+        statistic. `y` is unused in that case.
     label
         Display name for `y`, used in the title, colorbar, and saved
         filename (defaults to `y` itself) - e.g. pass label='exp' for
@@ -931,16 +940,34 @@ def topomap_with_colorbar(y, data, label=None, pct=True, condition=None, predict
     save
         True (default): save this figure - see _topomap_figure_path()
         for exactly where. False: just display it, save nothing.
+    colorbar_side
+        'right' (default) or 'left' - which side of the topomap the
+        colorbar is drawn on (ticks move to that same side).
+    colorbar_label
+        True (default): label the colorbar's own axis with `label` (or
+        `label (%)` for a percentage), in addition to the tick numbers.
+        False: tick numbers only, no separate axis label.
     """
-    label = y if label is None else label
-    mean_value = float(data[y].mean(('case', 'sensor')))
+    label = (y if y is not None else 'value') if label is None else label
+    if isinstance(data, NDVar):
+        # Already a group-level map (e.g. a significance-masked
+        # statistic) - nothing left to average across subjects, only
+        # across whatever the map itself still varies over (sensors,
+        # and - for a masked map - only the unmasked/significant ones).
+        mean_value = float(data.mean())
+    else:
+        mean_value = float(data[y].mean(('case', 'sensor')))
     value_str = f"{mean_value:.2%}" if pct else f"{mean_value:.3f}"
     title = f"Mean {label}: {value_str}"
     if condition is not None:
         title = f"{condition}: {title}"
-    p = plot.Topomap(y, data=data, title=title, **topo_args)
+    if isinstance(data, NDVar):
+        p = plot.Topomap(data, title=title, **topo_args)
+    else:
+        p = plot.Topomap(y, data=data, title=title, **topo_args)
     mappable = p.plots[0].plots[0].im
-    cb = p.figure.colorbar(mappable, ax=p.axes[0], shrink=0.7, label=f'{label} (%)' if pct else label)
+    cb = p.figure.colorbar(mappable, ax=p.axes[0], shrink=0.7, location=colorbar_side,
+                            label=(f'{label} (%)' if pct else label) if colorbar_label else None)
     vmin, vmax = mappable.get_clim()
     cb.set_ticks([vmin, 0, vmax])
     if pct:
