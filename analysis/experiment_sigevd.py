@@ -176,13 +176,23 @@ class RawSIGEVD(CachedRawPipe):
 
     def _make(self, raw, *, path, noise=False, raw_name=None, log=None, source_pipe=None):
         w, ch_names = _load_or_fit_sigevd_filter(path.subject, self.no_of_comps, self.lam)
-        picks = mne.pick_types(raw.info, meg=False, eeg=True, exclude=())
+        # 'bads' (not the () used elsewhere) to match eelbrain's own
+        # epochs_ndvar()/raw_ndvar() default - the filter was fit against
+        # the epoch-level EEG NDVar, which excludes bad channels by
+        # default (see eelbrain._io.fiff.epochs_ndvar).
+        picks = mne.pick_types(raw.info, meg=False, eeg=True, exclude='bads')
         raw_ch_names = [raw.ch_names[i] for i in picks]
-        assert raw_ch_names == ch_names, (
-            f"SI-GEVD filter channel order does not match this raw file's EEG "
-            f"channels for subject {path.subject!r} - delete its cache file "
-            f"under {SIGEVD_CACHE_DIR} and refit."
-        )
+        if raw_ch_names != ch_names:
+            only_in_raw = [c for c in raw_ch_names if c not in ch_names]
+            only_in_filter = [c for c in ch_names if c not in raw_ch_names]
+            raise AssertionError(
+                f"SI-GEVD filter channel mismatch for subject {path.subject!r}: "
+                f"{len(raw_ch_names)} raw EEG channels vs {len(ch_names)} in the "
+                f"cached filter. Only in raw: {only_in_raw or 'none'}. Only in "
+                f"filter: {only_in_filter or 'none'}. Delete its cache file under "
+                f"{SIGEVD_CACHE_DIR} and refit if the channel sets otherwise "
+                f"match but the order differs."
+            )
         raw._data[picks] = apply_sigevd_filter(raw._data[picks].T, w).T
         return raw
 
