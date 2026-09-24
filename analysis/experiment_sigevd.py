@@ -96,8 +96,24 @@ def _condition_pairs_single(ds, samplingrate):
 
 def _condition_pairs_shared(ds, samplingrate):
     "Diotic/binaural-style: same EEG, two concurrent streams (attend + ignore)"
-    attend_stim, resp = _trial_arrays(ds, samplingrate, 'fg')
-    ignore_stim, _ = _trial_arrays(ds, samplingrate, 'bg')
+    eeg = _eeg_ndvar(ds)
+    resp_trials, attend_trials, ignore_trials = [], [], []
+    for i in range(len(eeg)):
+        resp_i = eeg[i].get_data(('time', 'sensor'))
+        attend_i = _load_onset(ds[i, 'fg'], samplingrate).x
+        ignore_i = _load_onset(ds[i, 'bg'], samplingrate).x
+        # Trim all three together, not fg/bg independently - the fg and bg
+        # onset predictors for the same trial can have different native
+        # lengths, and attend_stim/ignore_stim/resp all have to end up the
+        # same length since ignore_stim is paired with the SAME resp as
+        # attend_stim (they're concurrent streams, not separate trials).
+        n = min(len(resp_i), len(attend_i), len(ignore_i))
+        resp_trials.append(resp_i[:n])
+        attend_trials.append(attend_i[:n])
+        ignore_trials.append(ignore_i[:n])
+    resp = numpy.vstack(resp_trials)
+    attend_stim = numpy.concatenate(attend_trials)
+    ignore_stim = numpy.concatenate(ignore_trials)
     return [(attend_stim, resp), (ignore_stim, resp)], resp
 
 
