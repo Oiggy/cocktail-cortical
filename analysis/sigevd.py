@@ -130,6 +130,10 @@ def find_sigevd_filter(condition_pairs, full_resp, fs, start, fin, no_of_comps, 
     full_resp = np.asarray(full_resp, dtype=float)
     full_resp_c = full_resp - full_resp.mean(axis=0, keepdims=True)
     r_yy = (full_resp_c.T @ full_resp_c) / full_resp_c.shape[0]
+    # Average-referenced/ICA-cleaned EEG is often rank-deficient, which
+    # leaves r_yy only positive *semi*-definite and breaks the Cholesky
+    # factorization eigh() needs for the generalized eigenproblem.
+    r_yy = r_yy + np.eye(r_yy.shape[0]) * (1e-8 * np.trace(r_yy) / r_yy.shape[0])
 
     eigenvalues, eigenvectors = eigh(r_xx, r_yy)  # ascending
     order = np.argsort(eigenvalues.real)[::-1]
