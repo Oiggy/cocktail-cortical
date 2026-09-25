@@ -23,6 +23,12 @@ How it works
   derivatives/sigevd/. `RawSIGEVD._make()` loads that cached filter
   (fitting and caching it first if it doesn't exist yet) and applies it to
   the continuous EEG channels.
+- The stimulus side of the fit uses the same predictors the rest of this
+  notebook's models use - `gammatone-8` (envelope) and `gammatone-on-8`
+  (onset), concatenated into one 16-band signal per role
+  (`_combined_predictor`) - not a separate, narrower predictor, so the
+  filter is trained to preserve exactly what `FULL_CLEAN`/`FULL_BASE`
+  actually test for.
 - Because this is a real raw-pipeline stage - not an ad-hoc, per-epoch
   transform bolted on after the fact - every e.load_trfs()/
   e.load_model_test() call already written throughout
@@ -62,10 +68,19 @@ SIGEVD_NO_OF_COMPS = 2  # the paper's own example value - not tuned for this dat
 SIGEVD_LAM = 0.2  # the paper's own example value - not tuned for this dataset yet
 
 
-def _load_onset(stim, samplingrate):
-    "Broadband onset predictor for one stimulus, resampled to match the EEG (mirrors UTSPredictor(resample='bin'))"
-    x = load.unpickle(PREDICTOR_DIR / f'{stim}~gammatone-on-1.pickle')
-    return x.bin(step=1 / samplingrate, label='start')
+def _load_predictor(stim, predictor_name, samplingrate):
+    "Load and bin an 8-band predictor pickle to match the EEG sample rate (mirrors UTSPredictor(resample='bin')), as a (time, frequency) array"
+    x = load.unpickle(PREDICTOR_DIR / f'{stim}~{predictor_name}.pickle')
+    x = x.bin(step=1 / samplingrate, label='start')
+    return x.get_data(('time', 'frequency'))
+
+
+def _combined_predictor(stim, samplingrate):
+    "8-band envelope (gammatone-8) + 8-band onset (gammatone-on-8) for one stimulus, concatenated into one (time, 16) array - matches envelope(role) + onset(role) in every model formula in this notebook"
+    envelope = _load_predictor(stim, 'gammatone-8', samplingrate)
+    onset = _load_predictor(stim, 'gammatone-on-8', samplingrate)
+    n = min(len(envelope), len(onset))
+    return numpy.concatenate([envelope[:n], onset[:n]], axis=1)
 
 
 def _eeg_ndvar(ds):
@@ -76,16 +91,16 @@ def _eeg_ndvar(ds):
 
 
 def _trial_arrays(ds, samplingrate, stim_column):
-    "Per-trial (time, sensor) EEG and matching (time,) onset predictor arrays for one stim_column ('fg' or 'bg')"
+    "Per-trial (time, sensor) EEG and matching (time, 16) combined envelope+onset predictor arrays for one stim_column ('fg' or 'bg')"
     eeg = _eeg_ndvar(ds)
     resp_trials, stim_trials = [], []
     for i in range(len(eeg)):
         resp_i = eeg[i].get_data(('time', 'sensor'))
-        stim_i = _load_onset(ds[i, stim_column], samplingrate).x
+        stim_i = _combined_predictor(ds[i, stim_column], samplingrate)
         n = min(len(resp_i), len(stim_i))
         resp_trials.append(resp_i[:n])
         stim_trials.append(stim_i[:n])
-    return numpy.concatenate(stim_trials), numpy.vstack(resp_trials)
+    return numpy.vstack(stim_trials), numpy.vstack(resp_trials)
 
 
 def _condition_pairs_single(ds, samplingrate):
@@ -100,20 +115,20 @@ def _condition_pairs_shared(ds, samplingrate):
     resp_trials, attend_trials, ignore_trials = [], [], []
     for i in range(len(eeg)):
         resp_i = eeg[i].get_data(('time', 'sensor'))
-        attend_i = _load_onset(ds[i, 'fg'], samplingrate).x
-        ignore_i = _load_onset(ds[i, 'bg'], samplingrate).x
+        attend_i = _combined_predictor(ds[i, 'fg'], samplingrate)
+        ignore_i = _combined_predictor(ds[i, 'bg'], samplingrate)
         # Trim all three together, not fg/bg independently - the fg and bg
-        # onset predictors for the same trial can have different native
-        # lengths, and attend_stim/ignore_stim/resp all have to end up the
-        # same length since ignore_stim is paired with the SAME resp as
+        # predictors for the same trial can have different native lengths,
+        # and attend_stim/ignore_stim/resp all have to end up the same
+        # length since ignore_stim is paired with the SAME resp as
         # attend_stim (they're concurrent streams, not separate trials).
         n = min(len(resp_i), len(attend_i), len(ignore_i))
         resp_trials.append(resp_i[:n])
         attend_trials.append(attend_i[:n])
         ignore_trials.append(ignore_i[:n])
     resp = numpy.vstack(resp_trials)
-    attend_stim = numpy.concatenate(attend_trials)
-    ignore_stim = numpy.concatenate(ignore_trials)
+    attend_stim = numpy.vstack(attend_trials)
+    ignore_stim = numpy.vstack(ignore_trials)
     return [(attend_stim, resp), (ignore_stim, resp)], resp
 
 
@@ -126,7 +141,11 @@ def _condition_pairs_disjoint(ds_left, ds_right, samplingrate):
 
 
 def _sigevd_cache_path(subject, no_of_comps, lam):
-    return SIGEVD_CACHE_DIR / f'sub-{subject}_comps-{no_of_comps}_lam-{lam}_sigevd-filter.npz'
+    # 'v2': the stimulus representation changed from a 1-band onset
+    # predictor to the 16-band envelope+onset combination - bumping this
+    # avoids silently reusing a filter fit against the old, differently
+    # shaped stimulus.
+    return SIGEVD_CACHE_DIR / f'sub-{subject}_comps-{no_of_comps}_lam-{lam}_v2_sigevd-filter.npz'
 
 
 def _fit_sigevd_filter(subject, no_of_comps, lam):

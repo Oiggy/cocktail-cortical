@@ -82,7 +82,9 @@ def find_sigevd_filter(condition_pairs, full_resp, fs, start, fin, no_of_comps, 
         One entry per condition whose stimulus-following response should
         be averaged into the bias covariance R_xx (see module docstring
         for the three shapes this project uses).
-        `stim`: (n_time,) or (n_time, 1) array, not yet lagged.
+        `stim`: (n_time,) or (n_time, n_features) array, not yet lagged
+        (n_features > 1 for a multi-band predictor, e.g. an 8-band
+        gammatone envelope/onset).
         `resp`: (n_time, n_channels) array, same n_time as its `stim`.
     full_resp : (n_time, n_channels) array
         EEG used for the R_yy ("everything") covariance - the single
@@ -112,7 +114,9 @@ def find_sigevd_filter(condition_pairs, full_resp, fs, start, fin, no_of_comps, 
 
     r_list = []
     for stim, resp in condition_pairs:
-        stim = np.asarray(stim, dtype=float).reshape(-1, 1)
+        stim = np.asarray(stim, dtype=float)
+        if stim.ndim == 1:
+            stim = stim.reshape(-1, 1)
         resp = np.asarray(resp, dtype=float)
 
         lagged = lag_data(stim, stim_lags)
