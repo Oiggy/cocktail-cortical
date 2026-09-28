@@ -44,6 +44,7 @@ doc/auto_examples
 # byproduct.
 !analysis/cortical_analysis.ipynb
 !analysis/cortical_analysis_2.ipynb
+!analysis/cortical_analysis_3.ipynb
 .ipynb_checkpoints
 
 # Data is not tracked in git - it lives in a sibling dataset/cocktail

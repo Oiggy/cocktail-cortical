@@ -140,6 +140,37 @@ def _condition_pairs_disjoint(ds_left, ds_right, samplingrate):
     return [(stim_l, resp_l), (stim_r, resp_r)], full_resp
 
 
+def load_decoding_trials(pipeline, subject, epoch, predictor_name, raw, samplingrate):
+    """Per-trial (attend_stim, ignore_stim, resp) arrays for one subject, one
+    condition, and one single predictor (e.g. 'gammatone-on-8' or
+    'gammatone-8') - not the combined envelope+onset signal
+    _fit_sigevd_filter uses. Used by cortical_analysis_3.ipynb's attention-
+    decoding pipeline (sigevd_eval.decode_attention_accuracy), under either
+    raw pipeline ('ica' or 'ica-sigevd') - `pipeline` is whichever `e`
+    (this module's or plain experiment.py's) the caller wants epochs from.
+
+    Reuses _eeg_ndvar/_load_predictor's already-fixed Datalist/bad-channel/
+    truncation handling (see their own docstrings), and the same
+    trim-everything-to-a-shared-length-per-trial approach
+    _condition_pairs_shared uses, for the same reason: the attended and
+    ignored predictors for one trial can have different native lengths.
+    """
+    ds = pipeline.load_epochs(epoch=epoch, subject=subject, raw=raw, samplingrate=samplingrate, ndvar='eeg', baseline=False)
+    eeg = _eeg_ndvar(ds)
+    trials = []
+    for i in range(len(eeg)):
+        resp_i = eeg[i].get_data(('time', 'sensor'))
+        attend_i = _load_predictor(ds[i, 'fg'], predictor_name, samplingrate)
+        ignore_i = _load_predictor(ds[i, 'bg'], predictor_name, samplingrate)
+        n = min(len(resp_i), len(attend_i), len(ignore_i))
+        trials.append({
+            'attend_stim': attend_i[:n],
+            'ignore_stim': ignore_i[:n],
+            'resp': resp_i[:n],
+        })
+    return trials
+
+
 def _sigevd_cache_path(subject, no_of_comps, lam):
     # 'v2': the stimulus representation changed from a 1-band onset
     # predictor to the 16-band envelope+onset combination - bumping this
