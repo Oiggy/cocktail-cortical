@@ -168,7 +168,11 @@ def load_envelope_decoder_data(pipeline, subject, epoch, raw, samplingrate):
     for i in range(len(eeg)):
         stim_i = _load_predictor_ndvar(ds[i, 'fg'], 'gammatone-8', samplingrate).sum('frequency')
         eeg_i = eeg[i]
-        n = min(len(stim_i), len(eeg_i))
+        # len(ndvar) is the size of its *first* dimension, whatever that
+        # happens to be internally (sensor, for eeg_i) - not necessarily
+        # time. get_dim('time').nsamples is unambiguous regardless of the
+        # NDVar's native axis order.
+        n = min(stim_i.get_dim('time').nsamples, eeg_i.get_dim('time').nsamples)
         time = UTS(0, 1 / samplingrate, n)
         envelopes.append(NDVar(stim_i.get_data(('time',))[:n], (time,), 'envelope'))
         eegs.append(NDVar(eeg_i.get_data(('time', 'sensor'))[:n], (time, eeg_i.get_dim('sensor')), 'eeg'))
