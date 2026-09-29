@@ -50,7 +50,7 @@ from pathlib import Path
 
 import mne
 import numpy
-from eelbrain import Datalist, NDVar, load
+from eelbrain import Dataset, Datalist, NDVar, UTS, load
 from eelbrain._experiment.preprocessing.config import CachedRawPipe
 
 from experiment import BinauralCocktail, DATA_ROOT
@@ -68,11 +68,15 @@ SIGEVD_NO_OF_COMPS = 2  # the paper's own example value - not tuned for this dat
 SIGEVD_LAM = 0.2  # the paper's own example value - not tuned for this dataset yet
 
 
-def _load_predictor(stim, predictor_name, samplingrate):
-    "Load and bin an 8-band predictor pickle to match the EEG sample rate (mirrors UTSPredictor(resample='bin')), as a (time, frequency) array"
+def _load_predictor_ndvar(stim, predictor_name, samplingrate):
+    "Load and bin an 8-band predictor pickle to match the EEG sample rate (mirrors UTSPredictor(resample='bin')), as an NDVar with (time, frequency) dims"
     x = load.unpickle(PREDICTOR_DIR / f'{stim}~{predictor_name}.pickle')
-    x = x.bin(step=1 / samplingrate, label='start')
-    return x.get_data(('time', 'frequency'))
+    return x.bin(step=1 / samplingrate, label='start')
+
+
+def _load_predictor(stim, predictor_name, samplingrate):
+    "Same as _load_predictor_ndvar, but as a plain (time, frequency) array"
+    return _load_predictor_ndvar(stim, predictor_name, samplingrate).get_data(('time', 'frequency'))
 
 
 def _combined_predictor(stim, samplingrate):
@@ -140,35 +144,38 @@ def _condition_pairs_disjoint(ds_left, ds_right, samplingrate):
     return [(stim_l, resp_l), (stim_r, resp_r)], full_resp
 
 
-def load_decoding_trials(pipeline, subject, epoch, predictor_name, raw, samplingrate):
-    """Per-trial (attend_stim, ignore_stim, resp) arrays for one subject, one
-    condition, and one single predictor (e.g. 'gammatone-on-8' or
-    'gammatone-8') - not the combined envelope+onset signal
-    _fit_sigevd_filter uses. Used by cortical_analysis_3.ipynb's attention-
-    decoding pipeline (sigevd_eval.decode_attention_accuracy), under either
-    raw pipeline ('ica' or 'ica-sigevd') - `pipeline` is whichever `e`
-    (this module's or plain experiment.py's) the caller wants epochs from.
+def load_envelope_decoder_data(pipeline, subject, epoch, raw, samplingrate):
+    """Per-trial (envelope, eeg) NDVars for one subject/condition, for
+    cortical_analysis_3.ipynb's envelope-decoding sub-question -
+    eelbrain.boosting()-based backward model (see that notebook's own
+    notes), not the sigevd.trf_estim/lag_data-based attention-classification
+    decoder this replaced.
 
-    Reuses _eeg_ndvar/_load_predictor's already-fixed Datalist/bad-channel/
-    truncation handling (see their own docstrings), and the same
-    trim-everything-to-a-shared-length-per-trial approach
-    _condition_pairs_shared uses, for the same reason: the attended and
-    ignored predictors for one trial can have different native lengths.
+    'envelope' is the attended ('fg') stream's broadband gammatone-8
+    envelope (the 8 frequency bands summed into one signal, matching how
+    'envelope' is a single time series in a typical AAD stimulus-
+    reconstruction decoder, unlike the 8-band predictor the rest of this
+    project's TRF models use). Returns a Dataset with one case per trial,
+    'envelope' and 'eeg' as Datalist columns (trials can have different
+    durations), each trial's pair trimmed to a shared sample count and
+    given a fresh, exactly-matching UTS time axis - avoiding any reliance
+    on the two NDVars' own (independently-binned, possibly off-by-one)
+    time dimensions lining up.
     """
     ds = pipeline.load_epochs(epoch=epoch, subject=subject, raw=raw, samplingrate=samplingrate, ndvar='eeg', baseline=False)
     eeg = _eeg_ndvar(ds)
-    trials = []
+    envelopes, eegs = [], []
     for i in range(len(eeg)):
-        resp_i = eeg[i].get_data(('time', 'sensor'))
-        attend_i = _load_predictor(ds[i, 'fg'], predictor_name, samplingrate)
-        ignore_i = _load_predictor(ds[i, 'bg'], predictor_name, samplingrate)
-        n = min(len(resp_i), len(attend_i), len(ignore_i))
-        trials.append({
-            'attend_stim': attend_i[:n],
-            'ignore_stim': ignore_i[:n],
-            'resp': resp_i[:n],
-        })
-    return trials
+        stim_i = _load_predictor_ndvar(ds[i, 'fg'], 'gammatone-8', samplingrate).sum('frequency')
+        eeg_i = eeg[i]
+        n = min(len(stim_i), len(eeg_i))
+        time = UTS(0, 1 / samplingrate, n)
+        envelopes.append(NDVar(stim_i.get_data(('time',))[:n], (time,), 'envelope'))
+        eegs.append(NDVar(eeg_i.get_data(('time', 'sensor'))[:n], (time, eeg_i.get_dim('sensor')), 'eeg'))
+    out = Dataset()
+    out['envelope'] = Datalist(envelopes)
+    out['eeg'] = Datalist(eegs)
+    return out
 
 
 def _sigevd_cache_path(subject, no_of_comps, lam):
