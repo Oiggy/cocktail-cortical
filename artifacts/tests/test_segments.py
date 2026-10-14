@@ -3,8 +3,8 @@ import ast
 import mne
 import pytest
 
-from artifact_cleaning import config
-from artifact_cleaning.preprocessing import segments as seg
+from artifacts import config
+from artifacts.preprocessing import segments as seg
 
 
 def _experiment_constants():

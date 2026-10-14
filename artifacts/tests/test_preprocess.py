@@ -3,9 +3,9 @@ import numpy as np
 import pytest
 from scipy.signal import welch
 
-from artifact_cleaning import config
-from artifact_cleaning.preprocessing.preprocess import detect_line_frequency, preprocess_raw, read_resampled
-from artifact_cleaning.preprocessing.segments import Segment
+from artifacts import config
+from artifacts.preprocessing.preprocess import detect_line_frequency, preprocess_raw, read_resampled
+from artifacts.preprocessing.segments import Segment
 
 from .synthetic import UV, blink_shape, pink_noise
 

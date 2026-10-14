@@ -23,7 +23,9 @@ before the next starts.
 ## Layout
 
 ```
-artifact_cleaning/
+artifacts/
+  01_labels.ipynb        batch 1: preprocess, auto-label, review, label accuracy
+  README.md
   config.py              paths, channel groups, preprocessing defaults
   paths.py               BIDS-derivatives file names
   preprocessing/
@@ -33,13 +35,20 @@ artifact_cleaning/
   labels/
     ocular.py            blink and saccade auto-labels from VEOG/HEOG
     emg.py               weak EMG labels from temporal high-frequency power
-    review.py            hand spot-check sheets, precision / miss rate
+    review.py            review sheets, event plots, precision / miss rate
     store.py             saving/loading labels, per-condition summaries
-  scripts/               command-line entry points (below)
+    pipeline.py          the steps 01_labels.ipynb runs, over a list of subjects
   tests/                 synthetic-data tests with known injected artifacts
 ```
 
-Everything is written to `<dataset>/cocktail/bids/derivatives/artifact_cleaning/`,
+**Notebooks vs. modules.** Each pipeline step whose results you look at
+(tables, plots, example events) is a numbered notebook directly in
+`artifacts/` - never inside a subfolder. The notebooks only choose
+settings, run steps and show results; all the actual work lives in the
+modules under the subfolders, where it is tested. Later batches add
+`02_...ipynb`, `03_...ipynb` and so on, in pipeline order.
+
+Everything is written to `<dataset>/cocktail/bids/derivatives/artifacts/`,
 BIDS-derivatives style (`sub-XX/eeg/sub-XX_task-cocktail_desc-<what>_<suffix>.<ext>`,
 group-level tables under `group/`, review sheets under `review/`).
 
@@ -47,7 +56,7 @@ group-level tables under `group/`, review sheets under `review/`).
 
 Uses the repo's existing `cocktail-cortical` environment. Batch 1 needs
 nothing beyond what eelbrain already pulls in, plus mne-bids and pandas
-(already used by `data/bids_extraction.py`):
+(already used by `data/bids_extraction.py`). From a terminal:
 
 ```
 conda activate cocktail-cortical
@@ -60,72 +69,78 @@ synthetic BIDS dataset; that test skips itself without it.)
 Later batches add `scikit-learn lightgbm xgboost` (batch 3); the batch
 that needs them will say so.
 
-Run everything from the repo root (the folder containing `artifact_cleaning/`).
+The dataset location defaults to the sibling `dataset/cocktail/bids`
+folder the rest of the repo uses; set the `COCKTAIL_BIDS_ROOT`
+environment variable to point elsewhere without editing any code.
 
 ## Batch 1: preprocessing and labels
 
-### 1. Preprocess and auto-label
+Open `01_labels.ipynb` with the `cocktail-cortical` environment active
+(select it as the kernel in VS Code, or from a terminal):
 
 ```
-python -m artifact_cleaning.scripts.make_labels --subjects all
+conda activate cocktail-cortical
+jupyter lab artifacts/01_labels.ipynb
 ```
+
+and run its cells in order. Settings (which subjects, how many events to
+review, whether to redo preprocessing) are in the cell under **Settings**.
+
+### Step 1: preprocess and auto-label
 
 Per subject this writes the preprocessed recording (`desc-preproc_eeg.fif`,
 ~150-250 MB each at float32), its segment table and a JSON of every
 preprocessing choice; ocular and EMG label tables; and
-`group/label_summary.tsv` (events per minute and % of time labelled, per
-subject and condition). Preprocessing is cached: re-running only re-labels
-unless `--rebuild` is given.
+`group/label_summary.tsv`. The notebook shows a table of the
+preprocessing choices per subject, the label summary, bar plots of event
+rates and % of time labelled per condition, and one example event of each
+type. Preprocessing is cached: re-running only re-labels unless
+`REBUILD = True`.
 
-### 2. Spot-check a subset by hand
+### Step 2: spot-check a subset by hand
 
-```
-python -m artifact_cleaning.scripts.make_review_sheets --subjects 01 05 09 --n-per-type 20
-```
-
-For each subject and label kind this draws 20 random events per type plus
-20 random **unlabelled** 1 s windows, and writes one PNG each plus a
-`review.csv`. Open the PNGs and fill in `verdict`:
+For each review subject and label kind, this draws `N_PER_TYPE` random
+events per type plus `N_UNLABELLED` random **unlabelled** 1 s windows, and
+writes one PNG each plus a `review.csv`. Open the PNGs and fill in
+`verdict`:
 
 - labelled events: `ok`, `wrong` or `unsure` (optionally `corrected_onset`
   / `corrected_duration`, in seconds)
 - unlabelled windows (`trial_type` = `none`): `clean`, or `missed:<type>`
   (e.g. `missed:blink`)
 
-Then:
+Sheets that already contain verdicts are never overwritten (unless
+`overwrite=True`).
 
-```
-python -m artifact_cleaning.scripts.summarize_reviews
-```
+### Step 3: label accuracy
 
-reports **precision** per type (from the labelled sample) and a **miss
-rate** (from the unlabelled sample) - the two numbers to report for the
+After filling in the sheets, the last cells report **precision** per type
+(from the labelled sample) and a **miss rate** (from the unlabelled
+sample), as tables and a bar plot - the two numbers to report for the
 auto-labeller. Reviewed sheets are applied automatically whenever labels
 are loaded for training (`labels/store.py: load_labels`): events marked
-`wrong` are dropped and corrections applied. Sheets that already contain
-verdicts are never overwritten unless `--overwrite` is passed.
+`wrong` are dropped and corrections applied.
 
 EMG labels are weak by design and **must** be reviewed before batch 3
 trains on them; ocular labels should be reviewed on at least a few
 subjects to report their accuracy.
 
-### 3. Tests
+## Tests
+
+From the repo root (the folder containing `artifacts/`):
 
 ```
-python -m pytest artifact_cleaning
+conda activate cocktail-cortical
+python -m pytest artifacts
 ```
 
 No real data is needed: the tests inject blinks, saccades, EMG bursts,
 mains noise and a CMS-like common-mode signal at known times into
 synthetic recordings and check they are found / removed. One test writes
 a small synthetic BIDS dataset laid out like the real one (channel names,
-trigger codes, eelbrain's bad-channel file) and runs all three scripts
-on it. Real-data behaviour still has to be checked with the review
-sheets.
-
-The dataset location defaults to the sibling `dataset/cocktail/bids`
-folder the rest of the repo uses; set the `COCKTAIL_BIDS_ROOT`
-environment variable to point elsewhere without editing any code.
+trigger codes, eelbrain's bad-channel file) and runs the whole
+`01_labels.ipynb` pipeline on it. Real-data behaviour still has to be
+checked with the review sheets.
 
 ## Batch 1 design decisions
 

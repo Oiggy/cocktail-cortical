@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from artifact_cleaning.labels import emg, ocular
-from artifact_cleaning.labels.review import apply_review, make_review_sheet, summarize_reviews
-from artifact_cleaning.labels.store import coverage_mask, label_summary
+from artifacts.labels import emg, ocular
+from artifacts.labels.review import apply_review, make_review_sheet, summarize_reviews
+from artifacts.labels.store import coverage_mask, label_summary
 
 from .synthetic import emg_channels, match, ocular_segment, segments_df
 

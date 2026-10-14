@@ -1,4 +1,4 @@
-# Lets `pytest artifact_cleaning` (run from the repo root) import the package.
+# Lets `pytest artifacts` (run from the repo root) import the package.
 import sys
 from pathlib import Path
 

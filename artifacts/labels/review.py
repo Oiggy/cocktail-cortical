@@ -12,12 +12,9 @@ the labelled sample) and a miss rate (from the unlabelled sample) - the
 two numbers to report for the auto-labeller. apply_review() drops events
 marked wrong and applies corrections, so reviewed labels feed training.
 """
-import matplotlib
-
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 PLOT_CHANNELS = ('VEOG', 'HEOG', 'Fp1', 'Fpz', 'Fp2', 'F7', 'F8', 'T7', 'T8', 'TP7', 'TP8')
 REVIEW_COLUMNS = ['id', 'subject', 'trial_type', 'onset', 'duration', 'segment', 'condition', 'channel',
@@ -30,7 +27,7 @@ def event_ids(subject, events):
     return [f'{subject}-{t}-{int(round(o * 1000))}' for t, o in zip(events['trial_type'], events['onset'])]
 
 
-def _segment_of(time, segments_df):
+def segment_of(time, segments_df):
     inside = segments_df[(segments_df['onset'] <= time) & (time < segments_df['onset'] + segments_df['duration'])]
     return None if inside.empty else inside.iloc[0]
 
@@ -53,7 +50,9 @@ def _unlabelled_windows(events, segments_df, n, duration, rng, margin=1.):
     return picked
 
 
-def _plot_item(raw, row, segment, out_png, context):
+def plot_event(raw, row, segment, context=2.):
+    """EOG plus frontal and temporal channels around one event (`row`: onset,
+    duration, trial_type, id, ...), clipped to its segment, event shaded."""
     sfreq = raw.info['sfreq']
     t0 = max(segment['onset'], row['onset'] - context)
     t1 = min(segment['onset'] + segment['duration'], row['onset'] + row['duration'] + context)
@@ -82,8 +81,7 @@ def _plot_item(raw, row, segment, out_png, context):
     ax.set_title(f"{row['id']}  [{row['trial_type']}, segment {segment['index']} {segment['condition']}]{amp_text}"
                  f"   (scale bar: {spacing:.0f} uV between traces)", fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_png, dpi=110)
-    plt.close(fig)
+    return fig
 
 
 def make_review_sheet(raw, events, segments_df, subject, out_dir, n_per_type=20, n_unlabelled=20,
@@ -105,9 +103,11 @@ def make_review_sheet(raw, events, segments_df, subject, out_dir, n_per_type=20,
 
     rows = []
     for item in items:
-        segment = _segment_of(item['onset'], segments_df)
+        segment = segment_of(item['onset'], segments_df)
         png = out_dir / f"{item['id']}.png"
-        _plot_item(raw, item, segment, png, context)
+        fig = plot_event(raw, item, segment, context)
+        fig.savefig(png, dpi=110)
+        plt.close(fig)
         rows.append({**{c: item.get(c, '') for c in REVIEW_COLUMNS}, 'subject': subject, 'png': png.name,
                      'verdict': '', 'corrected_onset': '', 'corrected_duration': '', 'notes': ''})
     sheet = pd.DataFrame(rows, columns=REVIEW_COLUMNS)

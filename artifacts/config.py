@@ -21,7 +21,7 @@ def set_bids_root(path):
     BIDS_ROOT = Path(path)
     # Everything this project writes goes under its own BIDS-derivatives
     # pipeline folder, next to (never inside) eelbrain's.
-    DERIV_ROOT = BIDS_ROOT / 'derivatives' / 'artifact_cleaning'
+    DERIV_ROOT = BIDS_ROOT / 'derivatives' / 'artifacts'
     # eelbrain's mark_bad_channels() (analysis/experiment.py) records bad
     # channels in a BIDS channels.tsv under this folder - reused here so
     # bad channels are only ever marked once for the whole repo.

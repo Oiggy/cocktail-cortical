@@ -1,4 +1,4 @@
-"""The three batch-1 scripts, run against a small synthetic BIDS dataset laid
+"""The labelling pipeline (labels/pipeline.py, what 01_labels.ipynb runs), against a small synthetic BIDS dataset laid
 out exactly like the real one (channel names, trigger codes, eelbrain's
 bad-channel file), with 20 s stories instead of ~4 min ones."""
 import json
@@ -8,11 +8,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from artifact_cleaning import config
-from artifact_cleaning.labels.store import load_labels, review_dir
-from artifact_cleaning.paths import deriv_path, group_path
-from artifact_cleaning.preprocessing import segments as segments_module
-from artifact_cleaning.scripts import make_labels, make_review_sheets, summarize_reviews
+from artifacts import config
+from artifacts.labels.store import load_labels, review_dir
+from artifacts.paths import deriv_path, group_path
+from artifacts.preprocessing import segments as segments_module
+from artifacts.labels.pipeline import label_subjects, review_summaries, write_review_sheets
+from artifacts.preprocessing.loading import resolve_subjects
 
 from .synthetic import UV, blink_shape, emg_channels, pink_noise
 
@@ -67,8 +68,9 @@ def _write_subject(root, subject, seed=0):
         bads_dir / f'sub-{subject}_task-{config.TASK}_channels.tsv', sep='\t', index=False)
 
 
-def test_scripts_end_to_end(bids_root):
-    make_labels.main(['--subjects', 'all'])
+def test_pipeline_end_to_end(bids_root):
+    summary, infos = label_subjects(resolve_subjects('all'), verbose=False)
+    assert infos.loc[0, 'interpolated'] == ['Cz']
 
     info = json.loads(deriv_path('01', 'preproc', 'eeg', 'json').read_text())
     assert info['interpolated'] == ['Cz'] and info['n_segments'] == 12
@@ -84,10 +86,11 @@ def test_scripts_end_to_end(bids_root):
     assert 12 * 4 <= len(blinks) <= 12 * 6
     assert set(blinks['condition']) == {'clean', 'binaural', 'dichotic', 'diotic'}
     assert len(load_labels('01', 'emg')) > 0
-    summary = pd.read_csv(group_path('label_summary.tsv'), sep='\t')
+    assert group_path('label_summary.tsv').exists()
     assert set(summary['condition']) == {'clean', 'binaural', 'dichotic', 'diotic'}
 
-    make_review_sheets.main(['--subjects', '01', '--n-per-type', '3', '--n-unlabelled', '2'])
+    written = write_review_sheets(['01'], n_per_type=3, n_unlabelled=2)
+    assert (written['status'] == 'written').all() and len(written) == 2
     sheet_path = review_dir('ocular', '01') / 'review.csv'
     sheet = pd.read_csv(sheet_path, keep_default_na=False)
     sheet['verdict'] = ['wrong'] + ['ok'] * (len(sheet) - 1)
@@ -95,9 +98,11 @@ def test_scripts_end_to_end(bids_root):
     sheet.to_csv(sheet_path, index=False)
 
     # a sheet with verdicts is never overwritten
-    make_review_sheets.main(['--subjects', '01', '--kinds', 'ocular'])
+    kept = write_review_sheets(['01'], kinds=['ocular'])
+    assert kept.loc[0, 'status'] == 'kept (has verdicts)'
     assert pd.read_csv(sheet_path, keep_default_na=False)['verdict'].tolist() == sheet['verdict'].tolist()
 
-    summarize_reviews.main(['--kinds', 'ocular'])
+    summaries = review_summaries(['ocular'])
     assert group_path('review_summary_ocular.tsv').exists()
+    assert summaries['ocular'].set_index('trial_type').loc['none', 'miss_rate'] == 0
     assert len(load_labels('01', 'ocular')) == len(ocular) - 1  # the 'wrong' one is dropped

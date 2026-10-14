@@ -45,6 +45,9 @@ doc/auto_examples
 !analysis/cortical_analysis.ipynb
 !analysis/cortical_analysis_2.ipynb
 !analysis/cortical_analysis_3.ipynb
+# The artifact-cleaning project's notebooks, which live directly in
+# artifacts/ (never in its subfolders, which hold the code they call).
+!artifacts/*.ipynb
 .ipynb_checkpoints
 
 # Data is not tracked in git - it lives in a sibling dataset/cocktail
