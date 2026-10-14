@@ -75,15 +75,9 @@ environment variable to point elsewhere without editing any code.
 
 ## Batch 1: preprocessing and labels
 
-Open `01_labels.ipynb` with the `cocktail-cortical` environment active
-(select it as the kernel in VS Code, or from a terminal):
-
-```
-conda activate cocktail-cortical
-jupyter lab artifacts/01_labels.ipynb
-```
-
-and run its cells in order. Settings (which subjects, how many events to
+Open `artifacts/01_labels.ipynb` in VS Code, the same way as the
+notebooks in `analysis/`. Select `cocktail-cortical` as its kernel (top
+right of the notebook), then run its cells in order. Settings (which subjects, how many events to
 review, whether to redo preprocessing) are in the cell under **Settings**.
 
 ### Step 1: preprocess and auto-label
