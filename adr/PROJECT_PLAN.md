@@ -417,6 +417,18 @@ Envelope:
    reference lag. This gives W_baseL and W_baseR.
 5. Convolve with the attended envelope to get X_L and X_R (38 min per condition).
 
+- Implemented in `adr.synth.dataset3` (milestone 4). Interpretation of
+  "38 min per condition": per noise subject, that subject's HRTF attended
+  envelopes (~38.5 min) are convolved trial by trial with W_baseL (X_L)
+  and with W_baseR (X_R); the same time-reversed noise is added to each,
+  giving two recordings per noise subject and 19 x 120 s trials per
+  condition (38 total, as in §9.4). The C5 shape is normalised by its value
+  at the reference lag, so W_base equals the long-term TRF at C5 and at the
+  reference lag. X is multiplied per channel by the noise sd (analysis
+  space) because the base TRFs come from z-scored EEG; X is added with
+  Cz = 0 (it lives in the Cz-referenced space). For each SNR the signal is
+  scaled and the noise keeps its real amplitude.
+
 ### 9.3 Noise, SNR and artifacts (our extension)
 
 1. Upsample X to 128 Hz (X is band-limited to 1 to 9 Hz, so this is lossless).
@@ -432,6 +444,9 @@ Envelope:
    - Set B noise subjects (8): testing.
    - Cross-fit: swap A and B and report both folds.
    - Save the split to `splits/` and never change it after tuning starts.
+     Frozen 2026-10-15 in `splits/dataset1_noise_subjects.yaml`:
+     Set A = S4, S5, S6, S7, S8, S10, S11, S14; Set B = S1, S2, S3, S9,
+     S12, S13, S15, S16.
 6. Artifact injection at 128 Hz:
    - **Primary templates from the phantom** (ocular, muscle, motion):
      - Isolate the artifact field by subtracting the trigger-aligned

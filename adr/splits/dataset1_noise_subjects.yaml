@@ -1,0 +1,8 @@
+# Dataset I v2.0 noise-subject split for Section A (PROJECT_PLAN.md §9.3 step 5, §14).
+# Frozen 2026-10-15: drawn once with numpy.random.default_rng(seed).permutation(16)
+# over S1..S16, seed = configs/project.yaml `seed` (20261015); first 8 -> set_a.
+# Set A tunes, Set B tests; then swap for the cross-fit fold.
+# Never change after tuning starts.
+sets:
+  set_a: [S4, S5, S6, S7, S8, S10, S11, S14]
+  set_b: [S1, S2, S3, S9, S12, S13, S15, S16]

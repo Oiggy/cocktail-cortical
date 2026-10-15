@@ -11,3 +11,5 @@ trf:
   lambda_long: das
 base_channel: C5    # base TRF shape (plan §9.2 step 3)
 condition: hrtf     # keep only HRTF trials, repetitions included (plan §9.1)
+snr_db: [0, -5, -10, -15, -20, -25]  # plan §9.3 step 4 (verified range 0 to -25 dB)
+trial_seconds: 120                   # short-term TRF trials (plan §9.4)

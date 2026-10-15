@@ -106,6 +106,29 @@ Milestones follow PROJECT_PLAN.md §17.
     beat their null; best channel P9, r = 0.039).
   - 32 tests pass (1 skipped: mtrf comparison).
 
+- **Milestone 4 - Dataset III synthesis (2026-10-15):**
+  - `adr.synth.dataset3` (base TRFs, X_L/X_R, upsampling, Cz handling,
+    noise from the time-reversed HRTF EEG, SNR measurement and scaling,
+    120 s trial cutting), `adr.trf.metrics.relative_mse` (Eq. 14-15),
+    `scripts/06_synthesize_dataset3.py`, SNR grid in `configs/section_a.yaml`.
+  - Noise-subject split frozen: Set A = S4, S5, S6, S7, S8, S10, S11, S14;
+    Set B = S1, S2, S3, S9, S12, S13, S15, S16
+    (`splits/dataset1_noise_subjects.yaml`, project seed).
+  - Unit test (plan §15): a known TRF is recovered through synthesis ->
+    Das preprocessing -> ridge at +20 dB (relative MSE < 0.02) and recovery
+    degrades at -20 dB. Eq. 14-15 metric tested (scale-free; 1 for
+    orthogonal or zero estimates).
+  - Real-data check on Set A subject S4 (no artifacts yet): every target SNR
+    is hit exactly; 19 x 120 s trials per condition. Long-term (38 min)
+    recovery relative MSE 0.10-0.16 across 0 to -25 dB (best at -10 dB). Short-term 120 s
+    TRFs: median relative MSE 0.29-0.35 at 0 dB rising to 0.94 at -25 dB
+    with lambda 0.2, versus 0.15 rising to 0.47-0.48 with the Das rule
+    (`results/section_a/dataset3_check.png`) - relevant to open item 11.
+  - Per-channel z-scoring slightly flattens the topography when the signal
+    is strong (0 dB), so recovery there is a little worse than at -10 dB;
+    this is inherent to the Das design and is reported, not corrected.
+  - 37 tests pass (1 skipped: mtrf comparison).
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -278,7 +301,10 @@ the code does not state them.
     sets lambda = 0.2 for the 120 s short-term TRFs. In the mTRF convention
     that is essentially no regularisation (the long-term TRF zig-zagged
     with it). Keep 0.2 as written, or use Das et al.'s per-trial rule
-    (penalty = max |X'X|, as now used for the long-term TRF)?
+    (penalty = max |X'X|, as now used for the long-term TRF)? Milestone 4
+    preview on Set A subject S4 without artifacts: median relative MSE of
+    120 s TRFs 0.29-0.94 with lambda 0.2 vs 0.15-0.48 with the Das rule
+    across 0 to -25 dB.
 
 ## Next
 
@@ -288,8 +314,8 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Milestone 4: Dataset III synthesis (base TRFs W_baseL/W_baseR from the
-  C5 shape scaled per channel at the reference lag; X_L/X_R; noise; SNR);
-  unit test that a known TRF is recovered at high SNR.
-- Milestones 5-9 (Section A), then 10 (Section B), 11 (ablations and
+- Milestone 5: PhysioMotion feature extraction (plus simulated pops) and
+  the two detectors (128 Hz and 250 Hz); cross-validated results; phantom
+  transfer test.
+- Milestones 6-9 (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).
