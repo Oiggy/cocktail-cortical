@@ -237,6 +237,10 @@ restricted.
   lambda = 0.2 for short-term TRFs). A Python mTRF implementation (e.g.,
   `mtrf` package) or a small custom ridge is fine; **VERIFY** equivalence on
   a toy example.
+- Ridge TRFs: `adr.trf.ridge` matches mTRFpy 2.1.2 (mTRF-Toolbox v2
+  convention) to machine precision on a toy example: bias column,
+  trial-averaged X'X, penalty lambda * fs, weights x fs (verified
+  2026-10-15).
 - MWF: implement the GEVD-based MWF of Somers et al. 2018 in Python (the
   original is MATLAB). Validate against a simple synthetic test (known rank-1
   artifact) before use.
@@ -379,7 +383,10 @@ EEG preprocessing for TRF analysis (applied after artifact handling):
 6. z-score each channel.
 
 - The paper does not state the exact order of filtering and downsampling.
-  Choose filter-then-downsample, document it.
+  Choose filter-then-downsample, document it. (Implemented as in the
+  authors' `preprocess_data.m`: Cz reference, equiripple 1-9 Hz FIR -
+  181 taps at 128 Hz meeting the MATLAB spec - applied forward-backward,
+  then keep every 4th sample; `adr.preprocessing.das`.)
 
 Envelope:
 
@@ -390,6 +397,14 @@ Envelope:
 5. Downsample to 32 Hz.
 6. Band-pass 1 to 9 Hz.
 7. z-score (per lag).
+
+- Implemented in `adr.envelope.das` following `preprocess_data.m`: audio
+  resampled to 8 kHz; 15 real 4th-order gammatone FIR filters at
+  `erbspacebw(150, 4000, 1.5)` (167-3588 Hz, 1.5-ERB spacing, one at
+  1 kHz), bandwidth 1.5 x ERB, unit gain at each centre; |.|^0.6 per band;
+  resampled to 128 Hz, band-passed 1-9 Hz (same FIR as the EEG), decimated
+  to 32 Hz, then summed. This band-passes at 128 Hz before decimating,
+  i.e. steps 5 and 6 above in the authors' order.
 
 ### 9.2 Synthetic response (Dataset III recipe)
 

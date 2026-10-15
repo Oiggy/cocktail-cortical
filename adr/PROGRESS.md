@@ -85,6 +85,27 @@ Milestones follow PROJECT_PLAN.md §17.
   - Correction: the phantom alignment R^2 was re-run on scalp channels only
     (0.64 brain-only; see above).
 
+- **Milestone 3 - envelope, Das preprocessing, long-term TRF (2026-10-15):**
+  - `adr.envelope.das`, `adr.preprocessing.das`, `adr.preprocessing.section_a`,
+    `adr.trf.ridge`, `configs/section_a.yaml`, `scripts/05_long_term_trf.py`.
+  - Ridge TRF verified against mTRFpy 2.1.2 (installed only in the session
+    scratchpad, not the environment): identical weights and bias once the
+    mTRF conventions are applied (bias column, trial-averaged covariance,
+    lambda * fs, weights x fs). `tests/test_trf_ridge.py` repeats the check
+    when `mtrf` is installed.
+  - Data: 160 HRTF trials, 16 subjects, 38.5 min/subject.
+  - With lambda = 0.2 the long-term TRF was essentially unregularised and
+    alternated sign lag to lag. Switched the long-term fit to Das et al.'s
+    own rule (penalty = max |X'X|, mTRF lambda ~231): smooth TRF, same
+    held-out prediction (r 0.0178 vs 0.0177).
+  - Result (`results/section_a/long_term_trf.png`): C5 peaks at ~156 ms,
+    trough ~250 ms, second peak ~312 ms; reference lag (max joint norm of
+    W_L, W_R) = 250 ms, with fronto-central positive / posterior negative
+    topography; W_L and W_R topographies correlate 0.96 there.
+    Story-part-held-out prediction r = 0.018 (null -0.000; 88% of trials
+    beat their null; best channel P9, r = 0.039).
+  - 32 tests pass (1 skipped: mtrf comparison).
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -253,6 +274,11 @@ the code does not state them.
 10. **`../dataset/cocktail/predictors`.** This folder exists next to
     `bids/derivatives/predictors`, but no code reads or writes it. Is it
     stale?
+11. **Short-term TRF lambda (Section A, needed at milestone 9).** The plan
+    sets lambda = 0.2 for the 120 s short-term TRFs. In the mTRF convention
+    that is essentially no regularisation (the long-term TRF zig-zagged
+    with it). Keep 0.2 as written, or use Das et al.'s per-trial rule
+    (penalty = max |X'X|, as now used for the long-term TRF)?
 
 ## Next
 
@@ -260,9 +286,10 @@ Order agreed 2026-10-15: finish everything for Section A first - detection,
 reconstruction, the ICA baseline, semi-synthetic validation on Dataset I
 v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
-Section B; item 9 is needed at Section A evaluation (milestone 9).
+Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Milestone 3: envelope extraction and Das preprocessing; reproduce a
-  sensible long-term TRF on Dataset I.
-- Milestones 4-9 (Section A), then 10 (Section B), 11 (ablations and
+- Milestone 4: Dataset III synthesis (base TRFs W_baseL/W_baseR from the
+  C5 shape scaled per channel at the reference lag; X_L/X_R; noise; SNR);
+  unit test that a known TRF is recovered at high SNR.
+- Milestones 5-9 (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).

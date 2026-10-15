@@ -1,0 +1,13 @@
+# Section A (semi-synthetic validation on Dataset I v2.0), PROJECT_PLAN.md §9.
+# TRFs follow the mTRF convention implemented in adr.trf.ridge.
+trf:
+  tmin: 0.0         # s; lags 0-400 ms = 14 samples at 32 Hz (Das et al. 2020)
+  tmax: 0.4
+  lambda_short: 0.2 # short-term TRFs within each 120 s trial (plan §9.4)
+  # Long-term TRFs (plan §9.2 step 1): Das et al.'s rule - penalty = max |X'X|
+  # (adr.trf.ridge.das_lambda). lambda = 0.2 left the TRF essentially
+  # unregularised: weights alternated sign lag to lag (roughness 3.1 vs 1.2)
+  # with identical held-out prediction (r 0.0177 vs 0.0178). Milestone 3.
+  lambda_long: das
+base_channel: C5    # base TRF shape (plan §9.2 step 3)
+condition: hrtf     # keep only HRTF trials, repetitions included (plan §9.1)
