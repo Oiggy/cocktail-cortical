@@ -48,5 +48,5 @@ def test_real_run():
     ann = pm.load_annotations(1, 1)
     for label in ann["label"].unique():
         pm.label_classes(label)            # every label parses
-    rest = raw.copy().crop(10, 130).load_data()
-    assert "AF4" in pm.bad_channels(rest)  # flat in sub-1 run 1
+    full = raw.copy().load_data()
+    assert pm.bad_channels(full) == ["AF4"]  # flat in sub-1 run 1; blinks don't flag Fp1/Fp2

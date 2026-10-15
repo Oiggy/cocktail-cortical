@@ -21,6 +21,9 @@ dependencies:
   - matplotlib
   - pyyaml
   - pytest
+  # Notebooks in adr/notebooks/ (VS Code: pick the `adr` conda env as kernel).
+  - ipykernel
+  - nbclient
   - pip
   - pip:
       - -e .

@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from adr.io.dataset1 import available_subjects, load_subject
@@ -11,6 +12,7 @@ def test_first_subject_structure():
     assert len(trials) == 20
     t = trials[0]
     assert t.sfreq == 128
+    assert 1e-6 < np.median(t.eeg.std(axis=0)) < 1e-4  # volts (files store microvolts)
     assert t.eeg.shape[1] == 64
     assert t.ch_names[47] == "Cz" and t.ch_names[13] == "C5"
     assert {tr.condition for tr in trials} == {"hrtf", "dry"}

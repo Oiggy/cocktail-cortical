@@ -48,6 +48,8 @@ doc/auto_examples
 # The artifact-cleaning project's notebooks, which live directly in
 # artifacts/ (never in its subfolders, which hold the code they call).
 !artifacts/*.ipynb
+# The adr project's notebooks (one per pipeline step; code lives in adr/src).
+!adr/notebooks/*.ipynb
 .ipynb_checkpoints
 
 # Data is not tracked in git - it lives in a sibling dataset/cocktail

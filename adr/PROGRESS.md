@@ -129,6 +129,68 @@ Milestones follow PROJECT_PLAN.md §17.
     this is inherent to the Das design and is reported, not corrected.
   - 37 tests pass (1 skipped: mtrf comparison).
 
+- **Notebooks and runnable steps (2026-10-15):** script logic moved into the
+  package (`adr.verify`, `adr.trf.long_term`, `adr.synth.check`,
+  `adr.detection.train`, `adr.detection.transfer`); scripts are thin
+  wrappers. Notebooks `notebooks/01_data_checks`, `02_long_term_trf`,
+  `03_dataset3_synthesis`, `04_detectors` (executed, outputs saved); run
+  instructions in README.md. New `adr` conda env (LightGBM 4.7, XGBoost 3.4,
+  Python 3.14) from `environment.yml`.
+- **Bug fixed:** Dataset I .mat files store microvolts; the loader now returns
+  volts like the other datasets. TRF/SNR results were unaffected
+  (scale-free); detectors and pops would not have been.
+- **Milestone 5 - detectors (2026-10-15):**
+  - PhysioMotion split frozen: 20 detector-training / 5 Set A templates /
+    5 Set B templates (`splits/physiomotion_participants.yaml`).
+  - Features (`adr.detection.features`, `configs/detection.yaml`): 1 s
+    windows, 0.5 s step; per channel log variance, log peak-to-peak,
+    kurtosis, log line length, Hjorth mobility/complexity, log Welch band
+    powers (1-4, 4-8, 8-13, 13-30, 30-45 Hz; + 65-95, 102-118 Hz at
+    250 Hz - bands avoid both mains families), correlation with mean
+    Fp1/Fp2; plus frontal/posterior RMS ratio. 685 features at 128 Hz,
+    799 at 250 Hz. Detector preprocessing (`adr.detection.prep`):
+    resample -> (pops) -> 0.5 Hz high-pass -> 57 channels -> average ref.
+  - Simulated pops (`adr.synth.pops`): step + exponential decay, 50-500 uV,
+    tau 0.05-0.5 s, random sign, never Cz; one per ~5 s of rest.
+  - Bad channels: robust rule (median over 1 s windows of the per-window sd);
+    the first version flagged healthy frontal channels from blinks. Only
+    AF4 in sub-1 runs 1-2 is bad.
+  - **Clean class refined (decided):** eyes-open rest blocks contain many
+    unannotated blinks, so rest windows with frontal peak-to-peak
+    > 100 uV are dropped (`clean_max_frontal_ptp_uv`).
+  - CV (participant-grouped 5-fold; 92k labelled windows incl. 6.8k pop
+    examples), PR-AUC:
+
+    | target | 128 LDA | 128 LGBM | 128 SVM | 250 LDA | 250 LGBM | 250 SVM |
+    |---|---|---|---|---|---|---|
+    | artifact | 0.945 | 0.970 | 0.964 | 0.938 | 0.969 | 0.964 |
+    | ocular | 0.879 | 0.923 | 0.917 | 0.861 | 0.917 | 0.905 |
+    | muscle | 0.801 | 0.871 | 0.848 | 0.846 | 0.909 | 0.896 |
+    | motion | 0.764 | 0.887 | 0.874 | 0.735 | 0.882 | 0.874 |
+    | pop | 0.258 | 0.866 | 0.483 | 0.248 | 0.852 | 0.435 |
+
+    LightGBM ROC-AUC 0.94-0.97; event sensitivity 0.87-0.99. At the default
+    0.5 threshold, specificity for artifact-vs-clean is only 0.73-0.78 and
+    false alarms are 89-618 per hour of clean rest (threshold is tuned on
+    Section A Set A at milestone 9). The 250 Hz detector is clearly better
+    for muscle (PR-AUC 0.909 vs 0.871; FA/h 89 vs 122), as intended.
+    RBF SVM trained on a 20k stratified subsample per fold.
+  - Frozen models: `results/detectors/<rate>Hz/<model>_<target>.joblib`.
+  - **Phantom transfer** (held-out 200-300 s pool, spline-mapped; leave-one-
+    out spline accuracy r = 0.976): LDA/SVM rank artifact conditions well
+    (AUC vs brain-only 0.91-1.00 for eyes/facial/neck/all; motion weak,
+    0.23-0.79), but LightGBM does not (motion 0.23-0.68, neck muscle at
+    128 Hz 0.45) and flags most brain-only windows: the phantom's spectrum
+    is flatter (Hjorth mobility 1.26 vs 0.60 for PhysioMotion), so tree
+    thresholds learned on real EEG do not carry over.
+  - **Domain gap on clean Dataset I (Set A, 128 Hz, artifact-free HRTF EEG):**
+    at the default threshold the detectors flag a median 40-66 % of windows
+    as artifact (LightGBM 66 %, by subject 19-84 %; ocular 37 %, muscle
+    16 %, motion 11 %, pop 1 %). Amplitudes match PhysioMotion after the
+    unit fix, so this is system/subject shift (plus possibly residual
+    activity MWF does not remove). See "Still open" item 12.
+  - 46 tests pass (1 skipped: mtrf comparison).
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -305,6 +367,13 @@ the code does not state them.
     preview on Set A subject S4 without artifacts: median relative MSE of
     120 s TRFs 0.29-0.94 with lambda 0.2 vs 0.15-0.48 with the Das rule
     across 0 to -25 dB.
+12. **Detector domain gap (decide before milestone 6/9).** On clean Dataset I
+    EEG the frozen detectors flag 40-66 % of windows at the default
+    threshold, and LightGBM does not transfer to the phantom. Options:
+    (a) tune only the threshold on Section A Set A (plan as written);
+    (b) add per-recording feature normalisation (robust z-score of each
+    feature within a recording) and retrain; (c) train both variants and
+    choose between them on Section A Set A (allowed: Set A is for tuning).
 
 ## Next
 
@@ -314,8 +383,8 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Milestone 5: PhysioMotion feature extraction (plus simulated pops) and
-  the two detectors (128 Hz and 250 Hz); cross-validated results; phantom
-  transfer test.
-- Milestones 6-9 (Section A), then 10 (Section B), 11 (ablations and
+- Decide item 12 (detector domain gap), then milestone 6: artifact
+  template extraction (phantom primary, PhysioMotion secondary) and
+  injection with the injection log.
+- Milestones 7-9 (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).

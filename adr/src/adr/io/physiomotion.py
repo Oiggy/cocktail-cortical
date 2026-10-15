@@ -125,15 +125,23 @@ def window_labels(
 
 
 def bad_channels(raw: mne.io.BaseRaw, low: float = 0.2, high: float = 5.0) -> list[str]:
-    """Flat or extremely noisy channels.
+    """Flat or persistently noisy channels, robust to intermittent artifacts.
 
-    The raw data are unfiltered (DC drift dominates), so the check runs on
-    a 0.5-40 Hz band-passed copy: a channel is bad if its standard deviation
-    is below `low` or above `high` times the median across channels.
+    On a 0.5-40 Hz band-passed copy (the raw data are DC-dominated), each
+    channel's standard deviation is computed in 1 s windows and summarised
+    by its median across windows, so blinks, movements and muscle bursts do
+    not count. A channel is bad if that median is below `low` or above
+    `high` times the median across channels. (An earlier version used the
+    plain standard deviation, which flagged healthy frontal channels in runs
+    without rest blocks, or with blinks in the eyes-open rest.)
     """
+    fs = raw.info["sfreq"]
     data = raw.get_data(picks="eeg")
-    sos = scipy.signal.butter(4, [0.5, 40], "bandpass", fs=raw.info["sfreq"], output="sos")
-    sd = scipy.signal.sosfiltfilt(sos, data, axis=1).std(axis=1)
+    sos = scipy.signal.butter(4, [0.5, 40], "bandpass", fs=fs, output="sos")
+    filtered = scipy.signal.sosfiltfilt(sos, data, axis=1)
+    n = int(fs)
+    k = filtered.shape[1] // n
+    sd = np.median(filtered[:, : k * n].reshape(len(filtered), k, n).std(axis=2), axis=1)
     median = np.median(sd)
     names = np.array(raw.copy().pick("eeg").ch_names)
     return list(names[(sd < low * median) | (sd > high * median)])

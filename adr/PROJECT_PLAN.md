@@ -290,7 +290,12 @@ adr/
   - `motion`: head rotation and nodding (PhysioMotion); phantom motion condition
   - `pop`: simulated electrode pops
   - `clean`: PhysioMotion rest blocks without annotations; phantom
-    brain-only condition
+    brain-only condition. **Refined 2026-10-15:** the eyes-open rest blocks
+    contain many unannotated blinks (Fp1/Fp2 peak-to-peak > 100 uV in
+    39-80% of 1 s windows in 8 of 13 runs checked), so rest windows with
+    frontal (mean Fp1/Fp2, 0.5-10 Hz) peak-to-peak > 100 uV are dropped
+    from training and from the false-alarm denominator
+    (`clean_max_frontal_ptp_uv` in configs/detection.yaml).
   - Combined PhysioMotion labels are multi-label (a window can carry more
     than one class).
 - **Window labels:** a window is assigned a class if any annotated channel in

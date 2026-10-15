@@ -3,7 +3,9 @@
 Each S<n>.mat holds a MATLAB cell array `trials` of 20 structs. The EEG is
 already 0.5 Hz high-passed, downsampled to 128 Hz and MWF-cleaned (Zenodo
 record description; the README.txt.txt inside the download omits the MWF
-sentence).
+sentence). The files store microvolts (`FileHeader.Channels.PhysicalDimension`
+= 'uV'); the loader returns volts, like the PhysioMotion and phantom loaders,
+so amplitude-based detector features and simulated pops share one scale.
 """
 from __future__ import annotations
 
@@ -17,13 +19,14 @@ import scipy.io
 from adr.config import load_paths
 
 N_SUBJECTS = 16
+UV_TO_V = 1e-6  # the .mat files store microvolts
 
 
 @dataclass(frozen=True)
 class Trial:
     subject: str
     trial_id: int
-    eeg: np.ndarray           # samples x channels, float64
+    eeg: np.ndarray           # samples x channels, float64, volts
     sfreq: float
     ch_names: tuple[str, ...]
     attended_ear: str         # 'L' or 'R'
@@ -115,7 +118,7 @@ def load_subject(subject: int | str, root: Path | None = None) -> list[Trial]:
         trials.append(Trial(
             subject=t["subject"],
             trial_id=int(t["TrialID"]),
-            eeg=np.asarray(t["RawData"]["EegData"], dtype=np.float64),
+            eeg=np.asarray(t["RawData"]["EegData"], dtype=np.float64) * UV_TO_V,
             sfreq=float(header["SampleRate"]),
             ch_names=tuple(ch["Label"] for ch in header["Channels"]),
             attended_ear=t["attended_ear"],

@@ -1,0 +1,40 @@
+# Detector settings (PROJECT_PLAN.md §6-7). Hyperparameters that get tuned
+# (detector threshold) are tuned on Section A Set A only (§8).
+window_s: 1.0          # plan: 0.5-1 s; window length is an ablation (§12)
+step_s: 0.5            # 50 % overlap
+highpass_hz: 0.5       # matches Dataset I v2.0's 0.5 Hz high-pass
+rates: [128, 250]      # two detectors (decided 2026-10-15)
+min_pairs: 1           # window label rule: OR over annotated bipolar pairs
+# Clean class = rest-block windows (eyes closed and eyes open) whose frontal
+# peak-to-peak (mean Fp1/Fp2, 0.5-10 Hz) is at most this. The eyes-open rest
+# contains many unannotated blinks; such windows are dropped from training
+# (not relabelled) and from the false-alarm denominator. Decided 2026-10-15.
+clean_max_frontal_ptp_uv: 100
+
+# Welch band powers. Bands avoid both mains families (50/100 Hz for
+# PhysioMotion, 60/120 Hz for Section B), so no notch filter is needed and
+# feature definitions are identical across datasets. The 128 Hz detector uses
+# `bands`; the 250 Hz detector uses `bands` + `bands_250`.
+bands:
+  delta: [1, 4]
+  theta: [4, 8]
+  alpha: [8, 13]
+  beta: [13, 30]
+  low_gamma: [30, 45]
+bands_250:
+  gamma: [65, 95]
+  high_gamma: [102, 118]
+
+# Frontal vs posterior amplitude gradient, and the frontal reference for
+# the correlation features (plan §7).
+frontal: [Fpz, Fp1, Fp2, AF7, AF3, AF4, AF8]
+posterior: [O1, Oz, O2, PO7, PO3, POz, PO4, PO8]
+frontal_reference: [Fp1, Fp2]
+
+# Simulated electrode pops (plan §3.4): abrupt step on one channel, then
+# exponential decay back to baseline; amplitude, decay constant and polarity
+# randomised. Never on Cz. Parameter ranges are an ablation (§12).
+pops:
+  amplitude_uv: [50, 500]
+  tau_s: [0.05, 0.5]
+  every_s: 5           # one pop per ~5 s of clean rest data in the augmented copy
