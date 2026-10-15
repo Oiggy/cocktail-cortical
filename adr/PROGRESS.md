@@ -27,10 +27,28 @@ Milestones follow PROJECT_PLAN.md §17.
     downsamples to 128 Hz, band-passes, then decimates to 32 Hz. Gammatone
     centre frequencies: `erbspacebw(150, 4000, 1.5)`. Relevant for milestone 3.
 
+- **Milestone 1b - PhysioMotion + phantom:** `scripts/03_download_openneuro.py`
+  (OpenNeuro API, pinned snapshots, size-checked) and
+  `scripts/04_verify_openneuro.py`. Local copies (in `paths.local.yaml`):
+  `~/Github Dataset/physiomotion_ds006386` (raw sub-* + Manual_Annotations,
+  24.7 GB; preprocessed_BIDS skipped) and `~/Github Dataset/phantom_ds004784`
+  (1.5 GB; the authors' Data/Imported and Data/Preprocessed copies skipped).
+  All §3.2/§3.3 VERIFY items resolved - details in PROJECT_PLAN.md. Key facts:
+  PhysioMotion labels live on the 34 bipolar pairs (19 electrodes), rest
+  blocks are clean; phantom has one 5-min trial per condition, ground-truth
+  waveforms included, alignment median R^2 0.68 after clock-skew correction.
+  **Decisions (2026-10-15):** phantom pools = three contiguous 100 s blocks
+  per condition (`splits/phantom.yaml`); detector features on all 57 shared
+  channels (frozen in `configs/project.yaml`), window labels from the
+  19-electrode bipolar annotations via OR.
+
 ## Next
 
-- **Milestone 1b - TUAR v3.0.1:** needs Joshua's registration + data-use
-  agreement; then verify the §3.2 items.
+- **Plan revision 2 (2026-10-15):** TUAR dropped. Detector training now uses
+  PhysioMotion (OpenNeuro ds006386); templates and the §9.5 ground-truth
+  check use the phantom EEG dataset (ds004784). Both open, no registration.
+- Milestone 2: loaders and channel alignment for Dataset I, PhysioMotion and
+  the phantom, with tests (after the open questions below are settled).
 
 ## Open questions for Joshua
 

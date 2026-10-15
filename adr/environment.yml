@@ -14,6 +14,7 @@ dependencies:
   - scipy
   - pandas
   - mne
+  - mne-bids
   - scikit-learn
   - lightgbm
   - xgboost
@@ -23,6 +24,8 @@ dependencies:
   - pip
   - pip:
       - -e .
+      # Downloads ds006386 (PhysioMotion) and ds004784 (phantom) from OpenNeuro.
+      - openneuro-py
       # eelbrain's gammatone_bank() needs this at runtime.
       - gammatone
       # Comparison method only (ICA + ICLabel); never imported by the

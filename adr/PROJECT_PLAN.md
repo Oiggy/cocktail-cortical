@@ -2,7 +2,9 @@
 
 Owner: Joshua Ighalo (PhD student, McMaster University)
 Target journal: Journal of Neural Engineering (methods paper)
-Status: planning complete, implementation started (see `PROGRESS.md`)
+Status: implementation started (see `PROGRESS.md`). Revision 2 (2026-10-15):
+TUAR replaced by PhysioMotion (detector training) and the phantom EEG
+dataset (templates and ground truth).
 
 This document is the single source of truth for the project. Read it fully
 before writing code. When something here is marked **VERIFY**, check it
@@ -33,8 +35,9 @@ Main claim: routing by artifact type (detector class decides which
 reconstruction method fixes each artifact) beats a single MWF and standard
 automated pipelines. Supporting claims:
 
-- A detector trained on clinical EEG (TUAR) transfers to research-grade
-  64-channel EEG; the domain gap is quantified.
+- A detector trained on one public lab dataset (PhysioMotion, Neuracle
+  system) transfers to BioSemi 64-channel speech-listening EEG; the domain
+  gap is quantified.
 - Detection quality limits reconstruction quality (shown by comparing
   detector flags, oracle flags, heuristic flags and random flags at matched
   flag rates).
@@ -61,7 +64,8 @@ a benchmark study. Report results honestly either way.
 | Dataset | Role | Access |
 |---|---|---|
 | Das et al. Dataset I v2.0 (KU Leuven AAD dataset) | Section A base data (semi-synthetic) | https://zenodo.org/records/4004271 (DOI 10.5281/zenodo.4004271), open, CC BY-NC-SA 4.0 |
-| TUAR v3.0.1 (TUH EEG Artifact Corpus) | Detector training; artifact templates | https://isip.piconepress.com/projects/nedc/html/tuh_eeg/ (free registration, data-use agreement) |
+| PhysioMotion Artifact (OpenNeuro ds006386) | Detector training (labelled artifacts plus clean rest) | https://openneuro.org/datasets/ds006386 (DOI 10.18112/openneuro.ds006386.v1.0.1), open, no registration |
+| Phantom EEG (OpenNeuro ds004784) | Artifact templates with known ground truth; external reconstruction test | https://openneuro.org/datasets/ds004784 (mirror: https://nemar.org/dataset/on004784), open, CC0 |
 | Joshua's own dataset | Section B real-data validation | Local (`../dataset/cocktail`, see `configs/paths.yaml`) |
 | Klados and Bamidis 2016 (optional) | Extra ocular ground-truth check | https://data.mendeley.com/datasets/wb6yvr725d |
 
@@ -102,23 +106,95 @@ restricted.
 - The MWF cleaning is stated on the Zenodo record page, not in the
   `README.txt.txt` shipped with the download.
 
-### 3.2 TUAR v3.0.1 details
+### 3.2 PhysioMotion Artifact details (detector training)
 
-- Clinical scalp EEG, EDF files under `edf/01_tcp_ar/` (signals in
-  average-reference configuration), annotations in matching `.csv` files
-  using TCP bipolar channel pairs.
-- Artifact labels: `eyem` (eye movement), `chew`, `shiv` (shivering), `musc`
-  (muscle), `elec` (electrode pop, electrostatic, lead), plus combinations
-  (e.g., `eyem_chew`).
-- Annotations are per bipolar channel (about 22 TCP pairs).
-- Mixed sampling rates (250, 256, 400, 512, 1000 Hz; most at 250 Hz).
-- **VERIFY** from the v3.0.1 README after download: file/patient counts,
-  exact label strings, whether every artifact is annotated (sources
-  disagree), channel naming.
-- No published TUAR-specific interrater agreement. Plan a re-annotation
-  subset to estimate label noise.
+- Data descriptor: Scientific Data 13:807 (2026),
+  doi:10.1038/s41597-026-07120-7. Code:
+  https://github.com/JiangweiYu221/PhysioMotion_Artifact (MIT).
+- 30 healthy adults, Neuracle NeuSen W system, about 120 min of continuous
+  EEG per participant across six blocks.
+- Two versions shared in BIDS: raw (59 EEG channels, 1000 Hz, no filtering)
+  and preprocessed (34 bipolar channels, 50 Hz notch, 0.5 to 150 Hz). **Use
+  the raw version** so channels can be matched to BioSemi positions.
+- Tasks: eyes-closed and eyes-open rest (2 min each per session); vertical
+  eye movements, horizontal eye movements, continuous blinking; head rotation
+  and nodding; tongue movement, chewing, swallowing, eyebrow raising; five
+  combined tasks (e.g., blinking plus eyebrow raising).
+- Annotations: point-wise and per channel, CSV columns `channel, start_time,
+  stop_time, label`, in a `Manual_Annotations` folder. Two blind annotators,
+  disagreements resolved jointly. No agreement statistic reported.
+- No dedicated EOG or EMG channels.
+- **VERIFIED (2026-10-15, `scripts/04_verify_openneuro.py`):**
+  - Raw: 59 EEG channels, 10-10 names, 1000 Hz, 30 subjects x 6 runs
+    (~1250 s each). 57 names shared with BioSemi 64 (PhysioMotion-only:
+    PO5, PO6; BioSemi-only: P1, P2, P9, P10, Iz, CPz, AFz).
+  - Licence: CC0 (`dataset_description.json`). BIDS authors: Jiangwei Yu,
+    Aonan He (paper author list still to check).
+  - **Annotations are on the 34 bipolar pairs of the preprocessed version**
+    (19 10-20 electrodes, e.g. `Fp1-F7`), plus a channel `ALL`. They must be
+    mapped from pairs to electrodes (§6). Times in seconds.
+  - Labels (180 CSVs): `blink`, `hor_eyem`, `ver_eyem`, `hor_headm`,
+    `ver_headm`, `tongue`, `chew`, `swallow`, `eyebrow`; combinations
+    `blink_hor_headm`, `blink_ver_headm`, `blink_eyebrow`, `tongue_eyebrow`,
+    `swallow_eyebrow`; rest blocks `close_base`, `open_base` (on `ALL`).
+  - Rest blocks are labelled (536 blocks), and **no artifact annotation
+    falls inside any of them**, so they can serve as `clean`.
+  - BIDS `events.tsv` trial codes are undocumented; use the annotation CSVs.
+- Plan a small re-annotation subset to estimate label noise (report Cohen's kappa).
 
-### 3.3 Joshua's dataset (Section B)
+### 3.3 Phantom EEG details (templates and ground truth)
+
+- Downey RJ and Ferris DP (2023), Sensors 23(19):8214. Electrically
+  conductive gelatin phantom head recorded with a dual-layer BioSemi
+  ActiveTwo system (128 scalp channels plus 128 outer noise-layer channels).
+  Sampling rate 512 Hz (verified).
+- Brain sources: 10 dipolar antennas broadcasting neural-mass-model signals
+  (about 20 uV at the scalp), time-aligned to the EEG with triggers.
+- Artifact sources: eye (saccade and blink antennas, about 150 uV),
+  facial/jaw muscle (bilateral masseter and temporalis antennas, recorded
+  chewing, swallowing, drinking EMG, about 300 uV), neck muscle (trapezius
+  and sternocleidomastoid antennas, walking EMG, about 150 uV), motion
+  (robotic platform reproducing a 1.5 m/s walking head trajectory).
+- Conditions (separate recordings): brain only, brain + eyes, brain + facial
+  muscle, brain + neck muscle, brain + motion, brain + all. Trials have start
+  and stop trigger markers; artifact sources are switched on per condition.
+- Extras: 8 neck EMG reference electrodes, noise-layer electrodes; iCanClean
+  plugin and example scripts.
+- **VERIFIED (2026-10-15, `scripts/04_verify_openneuro.py`):**
+  - Each condition (`task-Brain`, `Eyes`, `Facial`, `Neck`, `Walking`,
+    `All`) is **one 5-minute trial**, bounded by two `65471` triggers
+    (153596 samples apart); other codes (e.g. 65343) are to be ignored.
+    EEGLAB .set/.fdt; 128 EEG (A1..D32) + 128 MISC (noise layer) + 8 EMG
+    (EXG1-8); reference CMS (unreferenced).
+  - Broadcast waveforms are included: `stimuli/GTdata_croppedToRisingEdge.mat`,
+    `GTdata` 153600 x 21 at 512 Hz (ch 1-10 brain, 11-12 eyes, 13-16 neck,
+    17-20 facial, 21 trigger), cropped to the sync rising edges. No motion
+    channel (motion is mechanical).
+  - Alignment: the EEG trial is 4 samples shorter than the ground truth
+    (clock skew), so stretch the GT onto the EEG clock. After that and
+    average referencing, the 10 brain sources explain a median R^2 of 0.68
+    of the 1-40 Hz scalp EEG in the brain-only condition (peak at lag 0/-1),
+    0.60-0.68 with eyes/facial/neck on, and 0.18-0.24 with walking/all.
+    **Use regression on the GT (not brain-only subtraction) to isolate
+    artifact fields**, as the plan allows.
+  - Electrode positions: `electrodes.tsv` (264 rows, mm, CTF/EEGLAB); A1 at
+    (0, 0, 56) suggests idealized positions - check against the phantom
+    geometry before spline mapping.
+- Artifacts here propagate through a physical volume conductor onto real
+  BioSemi electrode positions, so templates are realistic in topography
+  without the 19-to-64 spline projection.
+
+### 3.4 Electrode pops and shivering (no public labelled source)
+
+- Electrode pops: simulate with the standard model (abrupt step on one
+  channel followed by exponential decay back to baseline; randomize
+  amplitude, decay constant and polarity). Document parameters and cite the
+  model in the methods.
+- Shivering: not included as a separate class (rare even in clinical
+  corpora). State this as a limitation; shivering-like activity falls under
+  the muscle class.
+
+### 3.5 Joshua's dataset (Section B)
 
 - BioSemi 64-channel EEG plus dedicated EOG channels, recorded with
   ActiView; stimuli presented with TDT, triggers mark stimulus onset.
@@ -145,8 +221,10 @@ restricted.
 ## 4. Environment
 
 - Python 3.11+.
-- Core: `numpy`, `scipy`, `pandas`, `mne`, `scikit-learn`, `lightgbm`
-  (and/or `xgboost`), `eelbrain`, `matplotlib`.
+- Core: `numpy`, `scipy`, `pandas`, `mne`, `mne-bids`, `scikit-learn`,
+  `lightgbm` (and/or `xgboost`), `eelbrain`, `matplotlib`.
+- Data download: `openneuro-py` (or DataLad) for ds006386 and ds004784;
+  direct Zenodo download for Dataset I.
 - Comparison method: `mne-icalabel` (ICA + ICLabel).
 - TRF/decoding: eelbrain boosting for Section B (matches existing pipeline).
   For Section A, use ridge-regression TRFs to match Das et al. (mTRF-style,
@@ -166,7 +244,7 @@ adr/
   configs/           # yaml configs: paths, splits, hyperparameters, SNR/SAR grids
   data/              # not committed; raw downloads and caches
   src/adr/
-    io/              # loaders: dataset1.py, tuar.py, own_dataset.py
+    io/              # loaders: dataset1.py, physiomotion.py, phantom.py, own_dataset.py
     preprocessing/   # filters, resampling, referencing, channel alignment
     envelope/        # gammatone envelope (Das spec) and project predictors
     synth/           # Dataset III synthesis, artifact templates, injection
@@ -183,23 +261,42 @@ adr/
 
 ## 6. Shared preprocessing and alignment
 
-- **Channel alignment (TUAR to BioSemi 64):** use the 19 shared 10-20
-  channels: Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, P7, P3, Pz, P4,
-  P8, O1, O2. Rename TUAR T3->T7, T4->T8, T5->P7, T6->P8. Drop A1, A2.
-- **TUAR labels:** map each bipolar pair label to its two electrodes. Primary
-  rule: a window is artifact if any pair in it is labelled (OR). Also report
-  alternative mappings, since OR inflates positives.
-- **Sampling rates:**
-  - Detector features: compute at a common rate. Section A runs at 128 Hz
-    (Dataset I v2.0), so Welch band powers must stay below 64 Hz there.
-    Section B can run at 250 Hz (keeps more muscle content). Train the
-    detector so it can operate at both rates, or train two versions;
-    document the choice.
-  - Document how each TUAR sampling rate is resampled.
-- **Reference for detector features:** average of the 19 shared channels,
+- **Detector channel set:** the channels whose names exist in both
+  PhysioMotion raw (10-10 names expected) and BioSemi 64. **Frozen
+  2026-10-15: 57 channels** (`detector_channels` in `configs/project.yaml`);
+  features use all 57. Fallback if names do not match:
+  the 19 standard 10-20 channels (Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz,
+  C4, T8, P7, P3, Pz, P4, P8, O1, O2), renaming old labels (T3->T7, T4->T8,
+  T5->P7, T6->P8) if they occur.
+- **Phantom to BioSemi 64:** the phantom uses the BioSemi 128 layout (A1 to
+  D32 labels, not 10-20 names). Map to BioSemi 64 positions with
+  spherical-spline interpolation from the 128-channel positions (dense to
+  sparser, so little smoothing).
+- **Label taxonomy (used for routing):**
+  - `ocular`: blinks, vertical and horizontal eye movements (PhysioMotion);
+    phantom eye condition
+  - `muscle`: chewing, swallowing, tongue, eyebrow raising (PhysioMotion);
+    phantom facial and neck muscle conditions
+  - `motion`: head rotation and nodding (PhysioMotion); phantom motion condition
+  - `pop`: simulated electrode pops
+  - `clean`: PhysioMotion rest blocks without annotations; phantom
+    brain-only condition
+  - Combined PhysioMotion labels are multi-label (a window can carry more
+    than one class).
+- **Window labels:** a window is assigned a class if any annotated channel in
+  the detector channel set carries that class during the window (OR).
+  PhysioMotion annotations exist only on the bipolar montage over 19 10-20
+  electrodes (`label_electrodes`) plus `ALL`, so window labels come from
+  those pairs (decided 2026-10-15). Also
+  report a stricter rule (at least 2 channels), since OR inflates positives.
+- **Sampling rates:** PhysioMotion 1000 Hz, phantom about 512 Hz. Resample to
+  128 Hz for Section A (Welch band powers below 64 Hz) and 250 Hz for
+  Section B. Train the detector at both rates, or train two versions;
+  document the choice.
+- **Reference for detector features:** average of the detector channel set,
   identical across datasets.
 
-## 7. Detection (supervised, non-neural; trained on TUAR)
+## 7. Detection (supervised, non-neural; trained on PhysioMotion)
 
 - Windows: 0.5 to 1 s, overlapping (e.g., 50 percent).
 - Features per window (time-domain or FFT only):
@@ -210,17 +307,26 @@ adr/
   - correlation with frontal channels (Fp1, Fp2)
 - Models: LightGBM/XGBoost (main), SVM RBF, LDA (baseline), optional random
   forest and stacked ensemble.
-- Targets: binary (artifact vs clean) and multiclass (eyem, chew, shiv, musc,
-  elec, clean). Routing needs the multiclass output.
+- Targets: binary (artifact vs clean) and per-class (ocular, muscle, motion,
+  pop, clean; multi-label). Routing needs the per-class output.
+- Pop class: trained on simulated pops injected into PhysioMotion clean rest
+  segments.
 - Class imbalance: class weights or balanced sampling.
-- Evaluation on TUAR: grouped k-fold by patient. Metrics: PR-AUC, ROC-AUC,
-  F1, sensitivity, specificity, event-level detection and false alarms per hour.
+- Evaluation on PhysioMotion: grouped k-fold by participant. Metrics: PR-AUC,
+  ROC-AUC, F1, sensitivity, specificity, event-level detection and false
+  alarms per hour.
 - Transfer evaluation:
+  - Phantom: score against condition and trigger labels (artifact source on
+    vs off). This tests transfer to a different system and to physically
+    propagated artifacts.
   - Section A: score against the injected-artifact log.
   - Section B: score ocular detection against labels derived from Joshua's
     EOG channels (threshold-based blink and saccade labels, spot-checked by hand).
-- Label noise: re-annotate a small TUAR subset (and a Section B subset),
-  double-annotate part of it, report Cohen's kappa.
+- Label noise: re-annotate a small PhysioMotion subset (and a Section B
+  subset), double-annotate part of it, report Cohen's kappa.
+- Caveat to report: PhysioMotion artifacts are task-induced and may be more
+  stereotyped than spontaneous ones; Section B measures how well detection
+  holds on spontaneous artifacts.
 
 ## 8. Reconstruction (supervised, non-neural; routed by artifact type)
 
@@ -228,8 +334,9 @@ Only flagged samples are corrected. Clean samples are left untouched.
 
 | Artifact class | Method |
 |---|---|
-| eyem | MWF fitted per recording using detector flags as labels (Somers et al. 2018), plus frontal-reference ridge regression (Fp1, Fp2, AF7, AF8 as EOG stand-in) fitted within flagged windows |
-| musc, chew, shiv, elec | Learned spatial interpolation: ridge regression trained on clean data to predict each channel from its neighbours; replace contaminated samples with the prediction |
+| ocular | MWF fitted per recording using detector flags as labels (Somers et al. 2018), plus frontal-reference ridge regression (Fp1, Fp2, AF7, AF8 as EOG stand-in) fitted within flagged windows |
+| motion | MWF fitted per recording on motion flags (spatially broad, low-frequency); compare against spatial interpolation as an ablation |
+| muscle, pop | Learned spatial interpolation: ridge regression trained on clean data to predict each channel from its neighbours; replace contaminated samples with the prediction |
 
 - Boundary handling: taper the transition between corrected and uncorrected
   samples (test with and without as an ablation).
@@ -299,16 +406,32 @@ Envelope:
    - Cross-fit: swap A and B and report both folds.
    - Save the split to `splits/` and never change it after tuning starts.
 6. Artifact injection at 128 Hz:
-   - Templates from TUAR. TUAR patients are split into three non-overlapping
-     groups: detector training, Set A templates, Set B templates.
-   - Isolate artifacts from the patient EEG: muscle, chewing, shivering:
-     high-pass about 20 Hz (also test a broadband version as an ablation);
-     eye movement: low-pass frontal channels; electrode pops: subtract a
-     smoothed baseline.
-   - Spread-out artifacts: project from 19 to 64 channels with
-     spherical-spline interpolation, then average-reference across 64.
-   - Electrode pops: inject into one randomly chosen electrode, **never Cz**
-     (Cz re-referencing would spread it everywhere).
+   - **Primary templates from the phantom** (ocular, muscle, motion):
+     - Isolate the artifact field by subtracting the trigger-aligned
+       brain-only signal from each brain + artifact trial. Brain waveforms
+       are broadcast identically and time-aligned, so the difference is
+       artifact plus sensor noise (**VERIFY** alignment quality; if the
+       broadcast brain waveforms are provided, regress them out instead).
+     - Keep templates broadband (no 20 Hz split).
+     - Map from BioSemi 128 to BioSemi 64 positions (spherical spline), then
+       average-reference across 64.
+     - Split phantom trials into disjoint pools: Set A templates, Set B
+       templates, and a held-out pool for the phantom check (§9.5). Each
+       condition is a single 5-min trial, so the pools are **three contiguous
+       100 s blocks** (0-100 s, 100-200 s, 200-300 s from the first trigger),
+       the same for every condition (`splits/phantom.yaml`, decided 2026-10-15).
+   - **Secondary templates from PhysioMotion** (an ablation, to test
+     templates recorded on real heads):
+     - Use only participants not used to train the detector (participants
+       split into three disjoint groups: detector training, Set A templates,
+       Set B templates).
+     - Isolate artifacts from the underlying EEG: muscle and chewing:
+       high-pass about 20 Hz (plus a broadband version); eye movement:
+       low-pass frontal channels; motion: low-pass.
+     - Map matched channels directly; spline-interpolate the remaining
+       BioSemi 64 positions.
+   - Electrode pops: simulated (§3.4), injected into one randomly chosen
+     electrode, **never Cz** (Cz re-referencing would spread it everywhere).
    - Signal-to-artifact ratio (SAR): -10 to +10 dB, same 20 x log10 RMS definition.
    - Log every injected artifact (type, onset, offset, channels, SAR). This
      log is the ground truth for detection scoring.
@@ -339,6 +462,24 @@ Envelope:
   pipeline rankings hold.
 - **Readout check:** repeat key outcomes with a 1 to 30 Hz band, because 1
   to 9 Hz hides residual muscle artifact.
+
+### 9.5 Phantom ground-truth check (real recorded artifacts, known brain signal)
+
+- Use the held-out phantom pool only; nothing here is tuned.
+- Run every pipeline (§11) on the brain + artifact recordings (each artifact
+  condition and the all-artifacts condition), with frozen settings.
+- Ground truth: the brain-only recording (trigger-aligned) or the broadcast
+  brain waveforms if provided.
+- Metrics: RRMSE (time and spectral) and correlation against ground truth,
+  per channel and per artifact condition; detection metrics against the
+  condition and trigger labels; fraction of data modified.
+- Run at the phantom's native layout (128 channels) and after mapping to
+  BioSemi 64, and report both.
+- Purpose: answers the reviewer concern that injected artifacts are
+  unrealistic, because these artifacts propagated physically and were
+  recorded, not added in software.
+- Caveat to state: a phantom has no real brain, skin or electrode-skin
+  interface, and only one "head".
 
 ## 10. Section B: real-data validation (Joshua's dataset)
 
@@ -421,7 +562,8 @@ Optional extra baseline (add only if time allows):
 - Boundary tapering on/off
 - MWF lag count and rank
 - Detector window length
-- Spline-projected vs. native-topography templates
+- Phantom-derived vs. PhysioMotion-derived templates
+- Simulated pop parameters (amplitude, decay constant)
 - High-passed vs. broadband muscle templates
 - SAR definition: all-channel RMS vs. affected-channel RMS
 - Over-cleaning cap values
@@ -439,8 +581,11 @@ Optional extra baseline (add only if time allows):
 
 ## 14. Leakage rules (non-negotiable)
 
-- TUAR split by patient into three disjoint groups (detector training, Set A
-  templates, Set B templates).
+- PhysioMotion split by participant into three disjoint groups (detector
+  training, Set A templates, Set B templates).
+- Phantom trials split into three disjoint pools (Set A templates, Set B
+  templates, §9.5 check): contiguous 100 s blocks of each 5-min trial
+  (`splits/phantom.yaml`).
 - Dataset I split by noise subject (Set A tuning, Set B testing), cross-fitted.
 - Never split one trial or segment between training and testing.
 - All tuning on Set A only; settings frozen before Set B and Section B.
@@ -450,13 +595,16 @@ Optional extra baseline (add only if time allows):
 
 - Release code, configs, split files, template-generation scripts and
   trained detectors.
-- Respect the Dataset I CC BY-NC-SA 4.0 licence and the TUAR data-use
-  agreement (do not redistribute raw data).
+- Respect the Dataset I CC BY-NC-SA 4.0 licence and the PhysioMotion and
+  phantom dataset licences (do not redistribute raw data; share code, splits
+  and derived summaries).
 - Every script reads paths and parameters from `configs/`, writes logs, and
   is deterministic given a seed.
 - Unit tests for: envelope extraction, Dataset III synthesis (recover a known
   TRF at high SNR), SNR/SAR scaling, MWF on a synthetic rank-1 artifact,
-  Eq. 14-15 metric, split integrity.
+  Eq. 14-15 metric, split integrity, simulated pop generator, phantom
+  template subtraction (brain-only residual near zero on a brain-only vs
+  brain-only check), PhysioMotion annotation-to-window labelling.
 
 ## 16. Limitations to state in the paper
 
@@ -464,20 +612,23 @@ Optional extra baseline (add only if time allows):
   MWF-based methods).
 - 128 Hz limits muscle-artifact realism in Section A.
 - Spline projection smooths focal artifacts.
-- Domain shift from clinical TUAR to research EEG.
-- TUAR label reliability is not published.
+- Domain shift from the PhysioMotion system (Neuracle) to BioSemi recordings.
+- PhysioMotion artifacts are task-induced; no inter-annotator agreement is published.
+- Phantom templates come from one physical head with no real tissue or skin interface.
+- Electrode pops are simulated; shivering is not modelled as a separate class.
 - Eye-gaze bias in Dataset I.
 - Small subject numbers.
 
 ## 17. Milestones (in order)
 
-1. Register for TUAR; download TUAR v3.0.1 and Dataset I v2.0. Verify the
-   items marked VERIFY.
+1. Download PhysioMotion (ds006386), the phantom dataset (ds004784) and
+   Dataset I v2.0 (all open, no registration). Verify the items marked VERIFY.
 2. Loaders and channel alignment for all three datasets, with tests.
 3. Envelope extraction and Das preprocessing; reproduce a sensible long-term
    TRF on Dataset I.
 4. Dataset III synthesis; unit test that a known TRF is recovered at high SNR.
-5. TUAR feature extraction and detector training; TUAR cross-validated results.
+5. PhysioMotion feature extraction (plus simulated pops) and detector
+   training; cross-validated results; phantom transfer test.
 6. Artifact template extraction and injection; injection log.
 7. Reconstruction methods (MWF, frontal ridge, spatial interpolation,
    router), with tests.
@@ -499,8 +650,12 @@ Optional extra baseline (add only if time allows):
 - Biesmans W, Das N, Francart T, Bertrand A (2016). Auditory-inspired speech
   envelope extraction methods for improved EEG-based auditory attention
   detection in a cocktail party scenario. IEEE TNSRE 25(5):402-412.
-- Hamid A et al. (2020). The Temple University Artifact Corpus: an annotated
-  corpus of EEG artifacts. IEEE SPMB.
+- PhysioMotion Artifact: a task-driven EEG dataset with point-wise motion
+  artifact annotations (2026). Sci Data 13:807.
+  doi:10.1038/s41597-026-07120-7 (**VERIFY** author list).
+- Downey RJ, Ferris DP (2023). iCanClean removes motion, muscle, eye, and
+  line-noise artifacts from phantom EEG. Sensors 23(19):8214.
+  doi:10.3390/s23198214 (**VERIFY** exact title).
 - Ingolfsson TM et al. (2024). Minimizing artifact-induced false-alarms for
   seizure detection in wearable EEG devices with gradient-boosted tree
   classifiers. Sci Rep 14:2980.
