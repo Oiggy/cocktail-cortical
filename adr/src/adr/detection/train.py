@@ -29,6 +29,7 @@ from adr.config import ADR_ROOT, load_paths, load_project
 from adr.detection import evaluate
 from adr.detection import models as M
 from adr.detection.dataset import run_features
+from adr.detection import features
 from adr.detection.features import detection_config, feature_names
 from adr.io.physiomotion import RUNS
 from adr.preprocessing.channels import detector_channels
@@ -43,19 +44,30 @@ def training_subjects() -> list[int]:
         return yaml.safe_load(f)["groups"]["detector_training"]
 
 
-def output_dir(fs: float):
+def output_dir(fs: float, variant: str = "raw"):
+    """results/detectors/<rate>Hz (raw variant) or .../<rate>Hz/norm."""
     path = load_paths()["results"] / "detectors" / f"{int(fs)}Hz"
+    if variant != "raw":
+        path = path / variant
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def load_rate(fs: float, subjects=None):
-    """Training rows (labelled windows + pop examples), targets, groups, and per-run sequences."""
+def load_rate(fs: float, subjects=None, variant: str = "raw"):
+    """Training rows (labelled windows + pop examples), targets, groups, and per-run sequences.
+
+    variant "norm": features robust-z-scored within each run (pop examples
+    with the statistics of the run they were injected into).
+    """
     max_ptp = detection_config()["clean_max_frontal_ptp_uv"]
     X, Y, groups, runs = [], [], [], []
     for s in subjects or training_subjects():
         for r in RUNS:
-            f = run_features(s, r, fs)
+            f = dict(run_features(s, r, fs))
+            stats = features.recording_stats(f["X"])
+            f["X"] = features.apply_variant(f["X"], variant, stats)
+            if len(f["X_pop"]):
+                f["X_pop"] = features.apply_variant(f["X_pop"], variant, stats)
             clean = f["rest"] & (f["fp_ptp_uv"] <= max_ptp)
             labelled = ~f["unlabelled"] & ~(f["rest"] & ~clean)  # drop blinky rest windows
             cls = {c: f[c][labelled] for c in ARTIFACT_CLASSES}
@@ -76,9 +88,9 @@ def _run_target(run: dict, target: str) -> np.ndarray:
     return run["ocular"] | run["muscle"] | run["motion"] if target == "artifact" else run[target]
 
 
-def cross_validate(fs: float, models=M.MODELS, targets=TARGETS, data=None) -> pd.DataFrame:
+def cross_validate(fs: float, models=M.MODELS, targets=TARGETS, data=None, variant: str = "raw") -> pd.DataFrame:
     cfg, seed = detection_config(), load_project()["seed"]
-    X, Y, groups, runs = data or load_rate(fs)
+    X, Y, groups, runs = data or load_rate(fs, variant=variant)
     log.info("%d Hz: %d rows x %d features; positives %s", fs, *X.shape,
              {t: int(Y[:, TARGETS.index(t)].sum()) for t in targets})
     folds = list(GroupKFold(n_splits=5).split(X, groups=groups))
@@ -97,27 +109,27 @@ def cross_validate(fs: float, models=M.MODELS, targets=TARGETS, data=None) -> pd
                         event_rows.append(evaluate.event_metrics(_run_target(run, target), pred, run["rest"], cfg["step_s"]))
             metrics = evaluate.window_metrics(Y[:, ti], scores, M.DEFAULT_THRESHOLD[model_name])
             metrics.update(evaluate.summarize_events(event_rows) if event_rows else {})
-            rows.append({"rate": int(fs), "model": model_name, "target": target, **metrics})
-            log.info("%d Hz %-8s %-8s PR-AUC %.3f ROC-AUC %.3f F1 %.3f sens %.3f spec %.3f | events %.3f FA/h %.1f",
-                     fs, model_name, target, metrics["pr_auc"], metrics["roc_auc"], metrics["f1"], metrics["sensitivity"],
+            rows.append({"rate": int(fs), "variant": variant, "model": model_name, "target": target, **metrics})
+            log.info("[%s] %d Hz %-8s %-8s PR-AUC %.3f ROC-AUC %.3f F1 %.3f sens %.3f spec %.3f | events %.3f FA/h %.1f",
+                     variant, fs, model_name, target, metrics["pr_auc"], metrics["roc_auc"], metrics["f1"], metrics["sensitivity"],
                      metrics["specificity"], metrics.get("event_sensitivity", np.nan),
                      metrics.get("false_alarms_per_hour", np.nan))
     return pd.DataFrame(rows)
 
 
-def fit_final(fs: float, models=M.MODELS, targets=TARGETS, data=None) -> None:
+def fit_final(fs: float, models=M.MODELS, targets=TARGETS, data=None, variant: str = "raw") -> None:
     seed = load_project()["seed"]
-    X, Y, _, _ = data or load_rate(fs)
-    out = output_dir(fs)
+    X, Y, _, _ = data or load_rate(fs, variant=variant)
+    out = output_dir(fs, variant)
     (out / "feature_names.txt").write_text("\n".join(feature_names(detector_channels(), fs)))
     for model_name in models:
         for target in targets:
             joblib.dump(M.fit(model_name, X, Y[:, TARGETS.index(target)], seed), out / f"{model_name}_{target}.joblib")
-    log.info("%d Hz: saved %d frozen models to %s", fs, len(models) * len(targets), out)
+    log.info("[%s] %d Hz: saved %d frozen models to %s", variant, fs, len(models) * len(targets), out)
 
 
-def load_model(fs: float, model_name: str, target: str):
-    return joblib.load(output_dir(fs) / f"{model_name}_{target}.joblib")
+def load_model(fs: float, model_name: str, target: str, variant: str = "raw"):
+    return joblib.load(output_dir(fs, variant) / f"{model_name}_{target}.joblib")
 
 
 def plot_cv(table: pd.DataFrame, metric: str = "pr_auc"):

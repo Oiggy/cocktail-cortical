@@ -23,6 +23,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rates", nargs="+", type=float, default=[float(r) for r in detection_config()["rates"]])
     parser.add_argument("--models", nargs="+", default=list(M.MODELS))
+    parser.add_argument("--variant", choices=["raw", "norm"], default="raw",
+                        help="raw features, or per-recording robust z-scored features")
     args = parser.parse_args()
     out_root = load_paths()["results"] / "detectors"
     out_root.mkdir(parents=True, exist_ok=True)
@@ -32,9 +34,10 @@ if __name__ == "__main__":
     seed_everything()
     tables = []
     for fs in args.rates:
-        data = train.load_rate(fs)
-        table = train.cross_validate(fs, args.models, data=data)
-        table.to_csv(train.output_dir(fs) / "cv_metrics.csv", index=False)
-        train.fit_final(fs, args.models, data=data)
+        data = train.load_rate(fs, variant=args.variant)
+        table = train.cross_validate(fs, args.models, data=data, variant=args.variant)
+        table.to_csv(train.output_dir(fs, args.variant) / "cv_metrics.csv", index=False)
+        train.fit_final(fs, args.models, data=data, variant=args.variant)
         tables.append(table)
-    train.plot_cv(pd.concat(tables)).savefig(out_root / "cv_pr_auc.png", dpi=150)
+    suffix = "" if args.variant == "raw" else f"_{args.variant}"
+    train.plot_cv(pd.concat(tables)).savefig(out_root / f"cv_pr_auc{suffix}.png", dpi=150)

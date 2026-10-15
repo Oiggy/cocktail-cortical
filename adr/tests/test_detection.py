@@ -86,3 +86,18 @@ def test_spline_reproduces_smooth_field():
     keep = np.arange(64) % 4 != 0
     M64 = spline.matrix(p64[keep], p64[~keep])
     np.testing.assert_allclose(M64 @ field(unit[keep]), field(unit[~keep]), atol=0.05)
+
+
+def test_normalize_per_recording():
+    rng = np.random.default_rng(5)
+    X = rng.standard_normal((500, 4)) * [1, 10, 0.1, 5] + [3, -7, 100, 0]
+    Z = features.normalize(X)
+    np.testing.assert_allclose(np.median(Z, axis=0), 0, atol=1e-6)
+    q75, q25 = np.percentile(Z, [75, 25], axis=0)
+    np.testing.assert_allclose((q75 - q25) / 1.349, 1, rtol=1e-3)
+    # an offset/scale change of the whole recording leaves the features unchanged
+    np.testing.assert_allclose(features.normalize(X * 3 + 2), Z, atol=1e-4)
+    # pop examples reuse their run's statistics
+    stats = features.recording_stats(X)
+    np.testing.assert_allclose(features.normalize(X[:10], stats), Z[:10], atol=1e-6)
+    assert features.apply_variant(X, "raw") is X

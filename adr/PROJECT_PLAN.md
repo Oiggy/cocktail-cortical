@@ -332,6 +332,10 @@ adr/
 - Pop class: trained on simulated pops injected into PhysioMotion clean rest
   segments.
 - Class imbalance: class weights or balanced sampling.
+- **Two feature variants (decided 2026-10-15):** `raw` features, and `norm`
+  features robust-z-scored within each recording (median, IQR/1.349).
+  Both are trained on PhysioMotion; the variant and the decision threshold
+  are chosen on Section A Set A (milestone 9), then frozen.
 - Evaluation on PhysioMotion: grouped k-fold by participant. Metrics: PR-AUC,
   ROC-AUC, F1, sensitivity, specificity, event-level detection and false
   alarms per hour. Report cross-validated results separately for the 128 Hz

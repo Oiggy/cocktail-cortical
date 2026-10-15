@@ -19,6 +19,12 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s",
                         handlers=[logging.StreamHandler(), logging.FileHandler(out_root / "phantom_transfer.log", mode="w")])
     logging.getLogger("adr.phantom_transfer").info("package versions: %s", package_versions())
-    table = transfer.run()
-    table.to_csv(out_root / "phantom_transfer.csv", index=False)
-    transfer.plot(table).savefig(out_root / "phantom_transfer.png", dpi=150)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--variant", choices=["raw", "norm"], default="raw")
+    parser.add_argument("--models", nargs="+", default=None)
+    args = parser.parse_args()
+    suffix = "" if args.variant == "raw" else f"_{args.variant}"
+    table = transfer.run(models=args.models or transfer.M.MODELS, variant=args.variant)
+    table.to_csv(out_root / f"phantom_transfer{suffix}.csv", index=False)
+    transfer.plot(table).savefig(out_root / f"phantom_transfer{suffix}.png", dpi=150)

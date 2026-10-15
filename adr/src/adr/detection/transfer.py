@@ -47,13 +47,15 @@ def phantom_features(condition: str, fs: float, pool: str = "phantom_check") -> 
     return features.compute(prep.finish(data, fs, names, cfg["highpass_hz"]), fs, detector_channels(), cfg)
 
 
-def run(rates=None, models=M.MODELS) -> pd.DataFrame:
+def run(rates=None, models=M.MODELS, variant: str = "raw") -> pd.DataFrame:
+    """Phantom transfer for one detector variant ("norm": each condition's
+    pool segment is normalised as its own recording)."""
     rows = []
     for fs in rates or [float(r) for r in features.detection_config()["rates"]]:
-        X = {c: phantom_features(c, fs) for c in CONDITION_CLASSES}
+        X = {c: features.apply_variant(phantom_features(c, fs), variant) for c in CONDITION_CLASSES}
         for model_name in models:
             for target in TARGETS:
-                model = load_model(fs, model_name, target)
+                model = load_model(fs, model_name, target, variant)
                 scores = {c: M.score(model_name, model, X[c]) for c in X}
                 thr = M.DEFAULT_THRESHOLD[model_name]
                 for condition, classes in CONDITION_CLASSES.items():
@@ -61,7 +63,7 @@ def run(rates=None, models=M.MODELS) -> pd.DataFrame:
                         continue
                     y = np.r_[np.zeros(len(scores["Brain"])), np.ones(len(scores[condition]))]
                     rows.append({
-                        "rate": int(fs), "model": model_name, "target": target, "condition": condition,
+                        "rate": int(fs), "variant": variant, "model": model_name, "target": target, "condition": condition,
                         "source_on_for_target": target == "artifact" or target in classes,
                         "auc_vs_brain": roc_auc_score(y, np.r_[scores["Brain"], scores[condition]]),
                         "flag_rate": float(np.mean(scores[condition] >= thr)),
@@ -89,3 +91,28 @@ def plot(table: pd.DataFrame, model: str = "lightgbm"):
         fig.colorbar(im, ax=ax, shrink=0.8)
     fig.tight_layout()
     return fig
+
+
+def dataset1_clean_flag_rates(subjects=None, variant: str = "raw", models=("lightgbm", "lda"),
+                              targets=("artifact", "ocular", "muscle", "motion", "pop")) -> pd.DataFrame:
+    """Fraction of artifact-free Dataset I windows flagged at the default threshold (domain gap).
+
+    Dataset I v2.0 is MWF-cleaned real EEG at 128 Hz, so only the 128 Hz
+    detector applies. Each subject's HRTF recording (the Section A noise
+    source, in forward time) is one recording for the `norm` variant. Set A
+    subjects by default: an indicator, not a tuning target.
+    """
+    from adr.synth import dataset3 as d3
+
+    rows = []
+    for subject in subjects or d3.load_noise_split()["set_a"]:
+        source = d3.noise_source(subject)
+        data = source.noise[::-1]
+        X = features.compute(prep.finish(data, 128.0, list(source.ch_names)), 128.0, detector_channels())
+        X = features.apply_variant(X, variant)
+        for model_name in models:
+            for target in targets:
+                score = M.score(model_name, load_model(128.0, model_name, target, variant), X)
+                rows.append({"subject": subject, "variant": variant, "model": model_name, "target": target,
+                             "flag_rate": float(np.mean(score >= M.DEFAULT_THRESHOLD[model_name]))})
+    return pd.DataFrame(rows)

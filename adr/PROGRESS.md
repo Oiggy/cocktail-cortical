@@ -191,6 +191,28 @@ Milestones follow PROJECT_PLAN.md §17.
     activity MWF does not remove). See "Still open" item 12.
   - 46 tests pass (1 skipped: mtrf comparison).
 
+- **Detector variants (item 12 decided 2026-10-15: option c):** a `norm`
+  variant robust-z-scores every feature within its recording (median,
+  IQR/1.349; `features.normalize`, `--variant norm`), trained alongside the
+  raw one (LightGBM + LDA; the slow RBF SVM was not retrained). The choice
+  between variants, and the threshold, is made on Section A Set A at
+  milestone 9. Models: `results/detectors/<rate>Hz/norm/`.
+  - Participant-grouped CV favours `norm` everywhere (LightGBM PR-AUC
+    128 Hz raw -> norm: artifact 0.970 -> 0.980, ocular 0.923 -> 0.939,
+    muscle 0.871 -> 0.955, motion 0.887 -> 0.928, pop 0.866 -> 0.906;
+    false alarms per hour down 25-60 %, e.g. muscle 122 -> 48;
+    artifact-vs-clean specificity 0.78 -> 0.90). 250 Hz similar.
+  - Clean Dataset I (Set A, 128 Hz, default threshold): LightGBM flags
+    68 % of windows (raw 66 %), now uniform across subjects (65-73 % vs
+    19-84 %). Likely cause: PhysioMotion runs are mostly artifact-laden task
+    time, so a run's median window is artifact-heavy and a clean
+    recording's median looks like "typical training run".
+  - Phantom: the condition-level test compares *between* recordings, which
+    the `norm` variant cancels by construction (AUCs ~0.5), so it cannot
+    evaluate `norm`. A within-recording phantom test needs window labels
+    from the broadcast artifact-source waveforms (GT channels 11-20).
+  - Notebook 04 shows the comparison.
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -367,7 +389,7 @@ the code does not state them.
     preview on Set A subject S4 without artifacts: median relative MSE of
     120 s TRFs 0.29-0.94 with lambda 0.2 vs 0.15-0.48 with the Das rule
     across 0 to -25 dB.
-12. **Detector domain gap (decide before milestone 6/9).** On clean Dataset I
+12. **Detector domain gap - DECIDED (c), see Done.** On clean Dataset I
     EEG the frozen detectors flag 40-66 % of windows at the default
     threshold, and LightGBM does not transfer to the phantom. Options:
     (a) tune only the threshold on Section A Set A (plan as written);
@@ -383,8 +405,9 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Decide item 12 (detector domain gap), then milestone 6: artifact
-  template extraction (phantom primary, PhysioMotion secondary) and
-  injection with the injection log.
+- Milestone 6: artifact template extraction (phantom primary, PhysioMotion
+  secondary) and injection with the injection log. Suggested addition:
+  window-level phantom labels from the broadcast artifact-source waveforms,
+  for a within-recording transfer test that can evaluate both variants.
 - Milestones 7-9 (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).

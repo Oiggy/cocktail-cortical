@@ -87,3 +87,33 @@ def compute(data: np.ndarray, fs: float, ch_names, cfg: dict | None = None) -> n
               mobility, complexity, *powers, corr]
     out = np.concatenate([*blocks, np.log10((front + EPS) / (back + EPS))[:, None]], axis=1)
     return out.astype(np.float32)
+
+
+VARIANTS = ("raw", "norm")
+
+
+def recording_stats(X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-feature median and robust scale (IQR / 1.349) over a recording's windows."""
+    median = np.median(X, axis=0)
+    q75, q25 = np.percentile(X, [75, 25], axis=0)
+    return median, (q75 - q25) / 1.349 + 1e-6
+
+
+def normalize(X: np.ndarray, stats=None) -> np.ndarray:
+    """Per-recording robust z-score of every feature (the `norm` detector variant).
+
+    Removes recording-level offsets (amplifier, cap, subject, spectral tilt)
+    so the detector judges each window relative to its own recording. The
+    median stays robust while artifacts cover less than half the windows.
+    `stats` lets pop examples reuse the statistics of the run they came from.
+    """
+    median, scale = stats if stats is not None else recording_stats(X)
+    return ((X - median) / scale).astype(np.float32)
+
+
+def apply_variant(X: np.ndarray, variant: str, stats=None) -> np.ndarray:
+    if variant == "raw":
+        return X
+    if variant == "norm":
+        return normalize(X, stats)
+    raise ValueError(f"Unknown detector variant {variant!r}")
