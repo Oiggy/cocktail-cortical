@@ -7,6 +7,7 @@ sentence).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +42,58 @@ class Trial:
     def dry_stimuli(self) -> tuple[str, str]:
         """Dry wav names for envelope extraction (PROJECT_PLAN.md §3.1)."""
         return tuple(s.replace("_hrtf.wav", "_dry.wav") for s in self.stimuli)
+
+
+_STIMULUS_NAME = re.compile(r"^(?:rep_)?part(\d+)_track(\d+)_(?:hrtf|dry)\.wav$")
+
+
+def stimulus_key(wav_name: str) -> tuple[int, int]:
+    """(part, track) of a stimulus wav, ignoring `rep_` and the hrtf/dry suffix.
+
+    `rep_partP_trackT` is the first ~2 min of `partP_trackT` (identical audio),
+    and the hrtf and dry versions carry the same speech, so all four names
+    map to the same key.
+    """
+    match = _STIMULUS_NAME.match(wav_name)
+    if not match:
+        raise ValueError(f"Unexpected stimulus name: {wav_name!r}")
+    return int(match[1]), int(match[2])
+
+
+def presentation_groups(trials: list[Trial]) -> list[int]:
+    """Cross-validation group label per trial (PROJECT_PLAN.md §9.4, §14).
+
+    Trials are grouped by the original presentation, and any trials that
+    share a stimulus are merged into one group (connected components over
+    shared stimulus keys). In Dataset I every trial plays both tracks of one
+    story part, experiment 2 replays experiment 1's pairs with attention
+    switched, and the repetitions are the openings of those parts, so the
+    groups end up being the story parts (labelled 1-4). Use with GroupKFold or
+    leave-one-group-out; never split a group between train and test.
+    """
+    parent = list(range(len(trials)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    first_trial_with = {}
+    for i, trial in enumerate(trials):
+        for key in map(stimulus_key, trial.stimuli):
+            if key in first_trial_with:
+                parent[find(i)] = find(first_trial_with[key])
+            else:
+                first_trial_with[key] = i
+    # Label each group by the lowest story part it contains, so labels mean
+    # the same thing in every subject.
+    roots = [find(i) for i in range(len(trials))]
+    labels = {}
+    for key, i in first_trial_with.items():
+        root = find(i)
+        labels[root] = min(labels.get(root, key[0]), key[0])
+    return [labels[root] for root in roots]
 
 
 def subject_path(subject: int | str, root: Path | None = None) -> Path:

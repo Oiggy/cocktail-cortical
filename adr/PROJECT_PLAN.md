@@ -164,17 +164,21 @@ restricted.
   - Each condition (`task-Brain`, `Eyes`, `Facial`, `Neck`, `Walking`,
     `All`) is **one 5-minute trial**, bounded by two `65471` triggers
     (153596 samples apart); other codes (e.g. 65343) are to be ignored.
-    EEGLAB .set/.fdt; 128 EEG (A1..D32) + 128 MISC (noise layer) + 8 EMG
-    (EXG1-8); reference CMS (unreferenced).
+    EEGLAB .set/.fdt; 128 scalp EEG (A1..D32) + 128 noise layer (`N-A1`..,
+    MISC in channels.tsv) + 8 EMG (EXG1-8); reference CMS (unreferenced).
+    The EEGLAB reader types all 256 electrodes as EEG, so select scalp
+    channels by name.
   - Broadcast waveforms are included: `stimuli/GTdata_croppedToRisingEdge.mat`,
     `GTdata` 153600 x 21 at 512 Hz (ch 1-10 brain, 11-12 eyes, 13-16 neck,
     17-20 facial, 21 trigger), cropped to the sync rising edges. No motion
     channel (motion is mechanical).
   - Alignment: the EEG trial is 4 samples shorter than the ground truth
     (clock skew), so stretch the GT onto the EEG clock. After that and
-    average referencing, the 10 brain sources explain a median R^2 of 0.68
-    of the 1-40 Hz scalp EEG in the brain-only condition (peak at lag 0/-1),
-    0.60-0.68 with eyes/facial/neck on, and 0.18-0.24 with walking/all.
+    average referencing over the 128 scalp channels, the 10 brain sources
+    explain a median R^2 of 0.64 of the 1-40 Hz scalp EEG in the brain-only
+    condition (peak at lag 0/-1); with artifacts on: eyes 0.24, facial 0.31,
+    neck 0.50, walking 0.43, all 0.10. (Corrected 2026-10-15: an earlier
+    run mixed in the noise-layer channels.)
     **Use regression on the GT (not brain-only subtraction) to isolate
     artifact fields**, as the plan allows.
   - Electrode positions: `electrodes.tsv` (264 rows, mm, CTF/EEGLAB); A1 at
@@ -213,10 +217,12 @@ restricted.
   boosting TRFs; `predictors/gammatone_predictors.py`,
   `analysis/cortical_analysis*.ipynb`). Reuse its predictor and TRF
   conventions for Section B.
-- **ASK JOSHUA:** EOG channel names, trigger codes, segment-to-condition
-  mapping, which subjects are included. (Raw data location and format are
-  known: BDF at `../dataset/cocktail/eeg/sX/sX_cocktail.bdf`, BIDS copy at
-  `../dataset/cocktail/bids`.)
+- Details extracted from the parent repo (EOG channels, montage, triggers,
+  segment design, subjects, predictors, TRF settings) are in PROGRESS.md
+  "Section B dataset", with open discrepancies under "Still open" (notably:
+  the code has 12 segments per subject, not 24). Raw data: BDF at
+  `../dataset/cocktail/eeg/sN/sN_cocktail.bdf` (4096 Hz), BIDS copy at
+  `../dataset/cocktail/bids`.
 
 ## 4. Environment
 
@@ -289,10 +295,13 @@ adr/
   electrodes (`label_electrodes`) plus `ALL`, so window labels come from
   those pairs (decided 2026-10-15). Also
   report a stricter rule (at least 2 channels), since OR inflates positives.
-- **Sampling rates:** PhysioMotion 1000 Hz, phantom about 512 Hz. Resample to
-  128 Hz for Section A (Welch band powers below 64 Hz) and 250 Hz for
-  Section B. Train the detector at both rates, or train two versions;
-  document the choice.
+- **Sampling rates:** PhysioMotion 1000 Hz, phantom 512 Hz. **Two separate
+  detectors (decided 2026-10-15):** a 128 Hz detector for Section A and a
+  250 Hz detector for Section B, each trained on PhysioMotion resampled to
+  that rate. Feature definitions are identical in both; only the Welch band
+  powers differ (below 64 Hz in the 128 Hz model, up to about 120 Hz in the
+  250 Hz model). Why: one shared model would have to drop everything above
+  64 Hz, discarding most of the muscle information Section B can use.
 - **Reference for detector features:** average of the detector channel set,
   identical across datasets.
 
@@ -302,7 +311,9 @@ adr/
 - Features per window (time-domain or FFT only):
   - variance, peak-to-peak, kurtosis, line length
   - Hjorth activity, mobility, complexity
-  - Welch band powers (delta, theta, alpha, beta, low gamma; capped below Nyquist)
+  - Welch band powers (delta, theta, alpha, beta, low gamma; capped below
+    Nyquist: < 64 Hz in the 128 Hz detector, up to ~120 Hz in the 250 Hz
+    detector)
   - frontal vs. posterior amplitude gradient
   - correlation with frontal channels (Fp1, Fp2)
 - Models: LightGBM/XGBoost (main), SVM RBF, LDA (baseline), optional random
@@ -314,7 +325,8 @@ adr/
 - Class imbalance: class weights or balanced sampling.
 - Evaluation on PhysioMotion: grouped k-fold by participant. Metrics: PR-AUC,
   ROC-AUC, F1, sensitivity, specificity, event-level detection and false
-  alarms per hour.
+  alarms per hour. Report cross-validated results separately for the 128 Hz
+  and the 250 Hz detector, and freeze both before any test data are touched.
 - Transfer evaluation:
   - Phantom: score against condition and trigger labels (artifact source on
     vs off). This tests transfer to a different system and to physically
@@ -448,9 +460,23 @@ Envelope:
   - Topoplots at the reference lag per pipeline.
   - Relative TRF MSE (Das et al. Eq. 14-15): concatenate all channels' TRFs,
     scale the estimate to the base TRF by least squares, then relative MSE.
-- **Forward prediction:** leave-one-trial-out across the 38 trials (train on
-  37, separate left and right TRFs, predict the held-out trial). Report
-  correlation with the EEG and with the noise-free X.
+- **Forward prediction:** cross-validated across the 120 s trials, **grouped
+  by stimulus** (decided 2026-10-15): individual 120 s trials are not
+  independent. The group label is the original presentation (attended_track
+  + part); every 120 s trial cut from one presentation is held out together,
+  and any trials that share a stimulus are merged into the same group. Use
+  GroupKFold or leave-one-group-out on that label (separate left and right
+  TRFs, predict the held-out group). Report correlation with the EEG and with
+  the noise-free X. Why: adjacent 120 s trials from one presentation leak
+  information between train and test (the trial-fingerprint problem the
+  Dataset I authors warn about), and a shared stimulus would let the model
+  predict from the stimulus itself instead of from a generalizable TRF.
+  - Implemented as `adr.io.dataset1.presentation_groups`. Consequence: in
+    Dataset I every trial plays both tracks of one story part, experiment 2
+    replays experiment 1's pairs with attention switched, and the
+    repetitions are the openings of those parts, so the groups collapse to
+    the 4 story parts; each subject's HRTF trials span only 2 of them
+    (~19.3 min each). See PROGRESS.md "Still open".
 - **Signal level:** RRMSE (time and spectral) and correlation between
   reconstructed and clean synthetic EEG.
 - **Detection:** sensitivity, specificity, F1, event-level metrics against
@@ -486,8 +512,10 @@ Envelope:
 - No synthetic data. Real artifacts, no ground truth.
 - Apply every pipeline (Section 11) with frozen settings, then identical
   downstream analysis.
-- Downstream analysis uses eelbrain boosting, leave-one-segment-out
-  cross-validation, matching `Oiggy/cocktail-cortical` conventions.
+- Downstream analysis uses eelbrain boosting, matching
+  `Oiggy/cocktail-cortical` conventions. Cross-validation is grouped by
+  audiobook segment (same rule as §9.4: a segment is never split between
+  training and testing, and segments sharing a stimulus share a group).
 
 Outcomes:
 
@@ -588,6 +616,9 @@ Optional extra baseline (add only if time allows):
   (`splits/phantom.yaml`).
 - Dataset I split by noise subject (Set A tuning, Set B testing), cross-fitted.
 - Never split one trial or segment between training and testing.
+- Cross-validation groups are stimulus-based: Section A by original
+  presentation, merged across shared stimuli (`presentation_groups`);
+  Section B by audiobook segment.
 - All tuning on Set A only; settings frozen before Set B and Section B.
 - Section B is evaluation only; nothing is tuned on it.
 
@@ -662,4 +693,7 @@ Optional extra baseline (add only if time allows):
 - Ronca V et al. (2024). o-CLEAN. J Neural Eng 21:056023.
 - Bailey NW et al. (2023). RELAX, Part 1. Clin Neurophysiol 149:178-201.
 - Rotaru I et al. (2024). What are we really decoding? J Neural Eng 21:016017.
-- Brodbeck C et al. (2020). (Follow-up study basis; full citation from Joshua.)
+- Brodbeck C, Jiao A, Hong LE, Simon JZ (2020). Neural speech restoration at
+  the cocktail party: Auditory cortex recovers masked speech of both attended
+  and ignored speakers. PLoS Biology 18(10): e3000883.
+  doi:10.1371/journal.pbio.3000883

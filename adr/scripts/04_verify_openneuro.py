@@ -27,6 +27,7 @@ import scipy.io
 import scipy.signal
 
 from adr.config import load_paths, package_versions
+from adr.io.phantom import scalp_channels
 
 log = logging.getLogger("verify_openneuro")
 
@@ -92,17 +93,23 @@ def verify_phantom(root) -> dict:
         events = pd.read_csv(root / f"sub-001/eeg/sub-001_task-{task}_events.tsv", sep="\t")
         marks = events.loc[events["value"] == PHANTOM_TRIAL_CODE, "sample"].to_numpy()
         s0, s1 = int(marks[0]), int(marks[1])
-        eeg = raw.get_data(picks="eeg")[:, s0:s1].T
+        # The EEGLAB reader types all 256 electrodes as EEG; keep the 128
+        # scalp channels (the noise layer is named N-...).
+        eeg = raw.get_data(picks=scalp_channels(raw.ch_names))[:, s0:s1].T
         eeg = eeg - eeg.mean(axis=1, keepdims=True)
         Y = scipy.signal.sosfiltfilt(sos, eeg, axis=0)[10:-10]
         # The EEG trial is a few samples shorter than the ground truth (clock
         # skew); stretch the ground truth onto the EEG clock.
         X = scipy.signal.sosfiltfilt(sos, scipy.signal.resample(gt[:, :10], s1 - s0, axis=0), axis=0)[10:-10]
         by_lag = {lag: float(np.median(r2_per_channel(np.roll(X, lag, 0), Y))) for lag in range(-3, 4)}
-        types = collections.Counter(raw.get_channel_types())
+        types = {
+            "scalp": len(scalp_channels(raw.ch_names)),
+            "noise_layer": sum(ch.startswith("N-") for ch in raw.ch_names),
+            "emg": sum(ch.startswith("EXG") for ch in raw.ch_names),
+        }
         report["tasks"][task] = {
             "sfreq": raw.info["sfreq"],
-            "channel_types": dict(types),
+            "channels": types,
             "n_trials": len(marks) // 2,
             "trial_samples": s1 - s0,
             "trial_seconds": (s1 - s0) / raw.info["sfreq"],
