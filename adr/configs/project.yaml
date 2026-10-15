@@ -1,0 +1,9 @@
+# Global settings shared by every script. Hyperparameters that get tuned on
+# Section A Set A live in their own config files once those stages exist.
+seed: 20261015
+
+# The 19 10-20 channels shared by TUAR and BioSemi 64 (PROJECT_PLAN.md §6).
+shared_channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8,
+                  P7, P3, Pz, P4, P8, O1, O2]
+tuar_rename: {T3: T7, T4: T8, T5: P7, T6: P8}
+tuar_drop: [A1, A2]

@@ -1,0 +1,16 @@
+# Where each dataset and output lives. To override any entry on one machine,
+# copy this file to paths.local.yaml (git-ignored) and edit it there.
+
+# Relative to the folder that contains the cocktail-cortical repo, matching
+# the parent repo's convention of keeping data in a sibling `dataset/` folder.
+datasets:
+  dataset1: dataset/das_dataset1_v2   # Zenodo 4004271: S1.mat ... S16.mat, stimuli.zip
+  tuar: dataset/tuar_v3.0.1           # TUAR v3.0.1 (contains edf/01_tcp_ar/)
+  own: dataset/cocktail               # Joshua's BioSemi recordings (eeg/, bids/, stimuli/)
+  klados: dataset/klados_bamidis_2016 # optional ocular ground truth
+
+# Relative to adr/ (git-ignored except splits/).
+outputs:
+  cache: data/cache
+  results: results
+  splits: splits

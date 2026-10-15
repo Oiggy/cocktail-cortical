@@ -1,0 +1,31 @@
+# Environment for the artifact detection and reconstruction (ADR) project.
+# Kept separate from the parent repo's cocktail-cortical environment so the
+# ML stack can move independently, but eelbrain comes from the same dev
+# label so Section B's boosting TRFs match the parent analysis exactly
+# (see ../environment.yml for why that label is needed).
+name: adr
+channels:
+  - conda-forge
+  - conda-forge/label/eelbrain_dev
+dependencies:
+  - python>=3.12
+  - eelbrain>=0.42.0a4
+  - numpy
+  - scipy
+  - pandas
+  - mne
+  - scikit-learn
+  - lightgbm
+  - xgboost
+  - matplotlib
+  - pyyaml
+  - pytest
+  - pip
+  - pip:
+      - -e .
+      # eelbrain's gammatone_bank() needs this at runtime.
+      - gammatone
+      # Comparison method only (ICA + ICLabel); never imported by the
+      # proposed method.
+      - mne-icalabel
+      - onnxruntime
