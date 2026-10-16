@@ -83,3 +83,40 @@ def plot(table: pd.DataFrame):
     axes[3].legend(frameon=False, fontsize=8)
     fig.tight_layout()
     return fig
+
+
+NATIVE_THRESHOLDS = (150, 200, 300, 500, None)
+
+
+def native_cut_table(subjects=None, thresholds=NATIVE_THRESHOLDS) -> pd.DataFrame:
+    """How much of each noise subject's base is cut at each threshold (descriptive, all subjects)."""
+    from adr.io.dataset1 import available_subjects
+
+    rows = []
+    for subject in subjects or available_subjects():
+        for thr in thresholds:
+            src = d3.noise_source(subject, ptp_uv=thr)
+            minutes = len(src.noise) / 128 / 60
+            rows.append({"subject": subject, "threshold_uv": thr if thr is not None else "none",
+                         "fraction_cut": src.fraction_cut, "minutes": minutes,
+                         "trials_120s_per_condition": len(d3.cut_trials(len(src.noise) // 4))})
+    return pd.DataFrame(rows)
+
+
+def native_recovery_sensitivity(subject: str | None = None, snr_db: float = -10,
+                                thresholds=NATIVE_THRESHOLDS) -> pd.DataFrame:
+    """Base-TRF recovery (no artifacts) on a Set A subject at each cut threshold."""
+    section = load_yaml("section_a")
+    base, lags, _ = d3.load_base_trfs()
+    subject = subject or d3.load_noise_split()["set_a"][0]
+    rows = []
+    for thr in thresholds:
+        src = d3.noise_source(subject, ptp_uv=thr)
+        for cond in d3.CONDITIONS:
+            rec = d3.synthesize(src, cond, snr_db, base, lags)
+            r = recovery(rec, base[cond], section["trf"], section["trial_seconds"])
+            rows.append({"subject": subject, "threshold_uv": thr if thr is not None else "none", "condition": cond,
+                         "fraction_cut": src.fraction_cut, **r})
+            log.info("%s threshold %s %s: cut %.1f %%, long-term relMSE %.3f, 120 s median relMSE (Das) %.3f, %d trials",
+                     subject, thr, cond, 100 * src.fraction_cut, r["long_term"], r["short_das"], r["n_trials"])
+    return pd.DataFrame(rows)

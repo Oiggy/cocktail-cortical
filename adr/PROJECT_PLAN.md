@@ -449,6 +449,12 @@ Envelope:
 
 1. Upsample X to 128 Hz (X is band-limited to 1 to 9 Hz, so this is lossless).
 2. Noise: concatenated 128 Hz v2.0 EEG of one subject, **time-reversed**.
+   Native transients of the MWF-cleaned base (1 s windows with any channel
+   > 500 uV peak-to-peak) are cut out first and the segments joined with
+   crossfades; remaining such windows are excluded from scoring (decided
+   2026-10-15; threshold from a sensitivity check - 200 uV would cut a
+   median 33 % of the base). Recordings are ~1 % shorter (18-19 x 120 s
+   trials per condition).
 3. Scale noise to the target SNR. SNR = 20 x log10(rms(X) / rms(noise)),
    averaged across channels, with both measured **after 1 to 9 Hz
    filtering** so the definition matches the paper.
@@ -692,7 +698,8 @@ Optional extra baseline (add only if time allows):
 ## 16. Limitations to state in the paper
 
 - Section A background noise was cleaned with MWF (partial circularity with
-  MWF-based methods).
+  MWF-based methods), and still contains native artifacts: extreme ones
+  (> 500 uV) are cut, moderate ones remain and count as "clean".
 - 128 Hz limits muscle-artifact realism in Section A.
 - Spline projection smooths focal artifacts.
 - Domain shift from the PhysioMotion system (Neuracle) to BioSemi recordings.

@@ -303,6 +303,33 @@ Milestones follow PROJECT_PLAN.md §17.
     is worse broadband than MWF alone (ridge adds error) - an
     `ocular_method` tuning choice.
 
+- **Native transients (item 13 decided 2026-10-15: option b, 500 uV):**
+  native transients are cut out of each noise subject's concatenated base
+  before time reversal (1 s windows with any channel > 500 uV
+  peak-to-peak, + 0.25 s margins; kept segments >= 2 s joined with 0.25 s
+  raised-cosine crossfades; X trimmed to match), and remaining such
+  windows are excluded from Section A scoring (`dataset3.transient_mask`,
+  `splice`, `noise_source(ptp_uv=...)`; `native_transient_ptp_uv: 500`).
+  - Sensitivity (`scripts/12_native_transients.py`, all 16 subjects,
+    descriptive): median fraction cut / worst subject / 120 s trials per
+    condition (median, min): 150 uV 58 % / 85 % / 6.5, 1; 200 uV 33 % /
+    77 % (S9) / 11.5, 2; 300 uV 11 % / 44 % / 16, 9; **500 uV 1 % / 3 % /
+    19, 18**; none 0 / 0 / 19, 19. Many subjects exceed 200 uV in large
+    fractions of windows (partly slow drift in the 0.5 Hz high-passed
+    data), so 200 uV was unusable; 500 uV removes the extreme bursts
+    (e.g. S4's 4 mV AF8 transient) and keeps the 19-trial design.
+  - Base-TRF recovery on S4 is insensitive to the threshold (long-term
+    relMSE 0.08-0.11 across all thresholds); detector flag rates on clean
+    Dataset I are unchanged by the cut (LightGBM raw 0.65 vs 0.66), so the
+    domain gap is not driven by the extreme transients.
+  - Re-run at 500 uV: S4 keeps 18 x 120 s trials per condition; oracle
+    reconstruction (1-9 Hz, flagged, natives excluded) no correction ->
+    routed / single MWF: SAR -10 dB ocular 5.25 -> 0.75 / 0.69, muscle
+    2.02 -> 0.58 / 0.57, motion 4.91 -> 0.58 / 0.58, pop 0.29 -> 0.15 /
+    0.33; SAR 0 dB pop 0.09 -> 0.15 / 0.17 (weak pops: correction hurts).
+  - Limitation to report: moderate native activity (200-500 uV) remains in
+    the base and is counted as "clean".
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -480,8 +507,7 @@ the code does not state them.
     120 s TRFs 0.29-0.94 with lambda 0.2 vs 0.15-0.48 with the Das rule
     across 0 to -25 dB.
 12. **Detector domain gap - DECIDED (c), see Done.**
-13. **Native transients in the "clean" Dataset I base (decide before
-    milestone 9).** The MWF-cleaned v2.0 data still contain large transients
+13. **Native transients - DECIDED (b) at 500 uV, see Done.** Original note: The MWF-cleaned v2.0 data still contain large transients
     (S4: 14 % of samples in 1 s windows with a channel > 200 uV
     peak-to-peak; up to 4 mV). Options: (a) exclude those windows from all
     Section A scoring (detection and reconstruction), with a threshold
@@ -504,7 +530,6 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Decide item 13 (native transients in the Dataset I base).
 - Milestone 8: ICA + ICLabel comparison pipeline (§11.1), then the optional
   automatic-MWF baseline.
 - Milestone 9: Section A tuning on Set A (detector variant + threshold,

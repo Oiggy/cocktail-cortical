@@ -77,3 +77,17 @@ def test_known_trf_recovered_at_high_snr():
         errors[snr] = relative_mse(trf.weights, base["L"])
     assert errors[20.0] < 0.02
     assert errors[-20.0] > errors[20.0]
+
+
+def test_transient_cut_and_splice():
+    rng = np.random.default_rng(7)
+    fs = 128.0
+    eeg = rng.standard_normal((int(fs * 60), 4)) * 1e-5
+    eeg[int(fs * 20):int(fs * 20) + 10, 1] += 1e-3           # 1 mV transient at 20 s
+    cut = d3.transient_mask(eeg, fs, 200)
+    assert cut[int(fs * 20)] and not cut[int(fs * 5)] and 0 < cut.mean() < 0.1
+    spliced = d3.splice(eeg, ~cut, fs)
+    n_fade = int(0.25 * fs)
+    assert len(spliced) == (~cut).sum() - n_fade             # one join
+    assert np.ptp(spliced, axis=0).max() < 200e-6            # transient gone
+    assert not d3.transient_mask(eeg, fs, None).any()

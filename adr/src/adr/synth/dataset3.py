@@ -10,7 +10,9 @@ to give X_R ("38 min simulated per condition", Das et al. 2020), each
 trial separately so no lag crosses a trial boundary. X is upsampled to
 128 Hz (it is band-limited to 1-9 Hz). The noise is the same subject's
 concatenated 128 Hz HRTF EEG, time-reversed, and is added to both
-conditions, giving two 64-channel recordings per noise subject.
+conditions, giving two 64-channel recordings per noise subject. Native
+transients of the "clean" base are cut out of the noise first (open item
+13, option b; `native_transient_ptp_uv` in configs/section_a.yaml).
 
 X lives in the Cz-referenced space (the TRFs were fitted on Cz-referenced
 EEG), so it is added with Cz = 0: after the pipeline's Cz re-referencing it
@@ -114,11 +116,61 @@ class NoiseSource:
     trial32: np.ndarray          # source trial id per 32 Hz sample (forward time)
     ch_names: tuple[str, ...]    # 64 BioSemi names
     noise_sd: np.ndarray         # 63, per-channel sd of the noise in the analysis space
+    fraction_cut: float = 0.0    # fraction of the base cut out as native transients
 
 
-def noise_source(subject: str) -> NoiseSource:
+def transient_mask(eeg: np.ndarray, fs: float, ptp_uv: float | None, window_s: float = 1.0,
+                   step_s: float = 0.5, margin_s: float = 0.25) -> np.ndarray:
+    """Samples inside 1 s windows where any channel exceeds `ptp_uv` peak-to-peak (+ margin)."""
+    mask = np.zeros(len(eeg), bool)
+    if ptp_uv is None:
+        return mask
+    win, step, margin = int(window_s * fs), int(step_s * fs), int(margin_s * fs)
+    for s0 in range(0, len(eeg) - win + 1, step):
+        if np.ptp(eeg[s0:s0 + win], axis=0).max() > ptp_uv * 1e-6:
+            mask[max(0, s0 - margin):s0 + win + margin] = True
+    return mask
+
+
+def splice(eeg: np.ndarray, keep: np.ndarray, fs: float, crossfade_s: float = 0.25,
+           min_segment_s: float = 2.0) -> np.ndarray:
+    """Concatenate the kept segments (>= min_segment_s) with raised-cosine crossfades.
+
+    Each join overlaps the end of one segment with the start of the next over
+    `crossfade_s`, so cutting out transients does not create new steps.
+    """
+    padded = np.concatenate([[False], keep, [False]]).astype(int)
+    edges = np.flatnonzero(np.diff(padded))
+    segments = [eeg[a:b] for a, b in zip(edges[::2], edges[1::2]) if b - a >= int(min_segment_s * fs)]
+    if not segments:
+        raise ValueError("no clean segment left")
+    n = int(crossfade_s * fs)
+    ramp = (0.5 - 0.5 * np.cos(np.pi * (np.arange(n) + 0.5) / n))[:, None]
+    out = segments[0]
+    for seg in segments[1:]:
+        if n == 0:
+            out = np.concatenate([out, seg])
+            continue
+        blended = out[-n:] * ramp[::-1] + seg[:n] * ramp
+        out = np.concatenate([out[:-n], blended, seg[n:]])
+    return out
+
+
+def noise_source(subject: str, ptp_uv: float | None | str = "config") -> NoiseSource:
+    """Noise and envelopes for one noise subject.
+
+    Native transients of the MWF-cleaned base (1 s windows with any channel
+    above `native_transient_ptp_uv` peak-to-peak, plus 0.25 s margins) are
+    cut out of the concatenated EEG before time reversal (open item 13,
+    option b) and the remaining segments joined with crossfades; X is then
+    trimmed to the cleaned noise length, so a recording is a little shorter
+    than 38.5 min. `ptp_uv=None` keeps the noise uncut.
+    """
     paths = load_paths()
-    condition = load_yaml("section_a")["condition"]
+    section = load_yaml("section_a")
+    condition = section["condition"]
+    if ptp_uv == "config":
+        ptp_uv = section.get("native_transient_ptp_uv")
     trials = load_subject(subject)
     groups = presentation_groups(trials)
     kept = [(t, g) for t, g in zip(trials, groups) if t.condition == condition]
@@ -132,15 +184,30 @@ def noise_source(subject: str) -> NoiseSource:
         envelopes.append(env[:n32])
         groups32.append(np.full(n32, group))
         trial32.append(np.full(n32, trial.trial_id))
-    noise = np.concatenate(eeg)[::-1].copy()
+    forward = np.concatenate(eeg)
+    cut = transient_mask(forward, FS_IN, ptp_uv)
+    if cut.any():
+        forward = splice(forward, ~cut, FS_IN)
+    n32 = len(forward) // UPSAMPLE
+    forward = forward[: n32 * UPSAMPLE]
+    noise = forward[::-1].copy()
+    # Trim the envelope sequence (and its labels) to the cleaned noise length.
+    trimmed, total = [], 0
+    for env in envelopes:
+        take = min(len(env), n32 - total)
+        if take <= 0:
+            break
+        trimmed.append(env[:take])
+        total += take
     return NoiseSource(
         subject=subject,
         noise=noise,
-        envelopes=envelopes,
-        groups32=np.concatenate(groups32),
-        trial32=np.concatenate(trial32),
+        envelopes=trimmed,
+        groups32=np.concatenate(groups32)[:n32],
+        trial32=np.concatenate(trial32)[:n32],
         ch_names=kept[0][0].ch_names,
         noise_sd=analysis_space(noise).std(axis=0),
+        fraction_cut=float(cut.mean()),
     )
 
 
