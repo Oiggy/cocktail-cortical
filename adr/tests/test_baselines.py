@@ -34,7 +34,11 @@ def test_heuristic_flags_find_blinks_and_muscle():
         eeg[s:s + 40, frontal] += 150e-6 * np.hanning(40)[:, None]
     emg_span = slice(int(FS * 100), int(FS * 104))
     eeg[emg_span, NAMES.index("T7")] += 40e-6 * rng.standard_normal(int(FS * 4))
-    flags, starts = mwf_auto.heuristic_flags(eeg, FS, NAMES)
+    # Mechanism test with an explicit threshold (the frozen config value is
+    # calibrated to Section A data, not to this toy background).
+    from adr.config import load_yaml
+    cfg = dict(load_yaml("baselines")["mwf_auto"], muscle_slope_threshold=-0.59)
+    flags, starts = mwf_auto.heuristic_flags(eeg, FS, NAMES, cfg)
     hit_blink = [np.any(flags["ocular"][(starts <= s / FS) & (starts + 1 > s / FS)]) for s in blink_at]
     assert np.mean(hit_blink) > 0.9
     in_emg = (starts >= 100) & (starts + 1 <= 104)

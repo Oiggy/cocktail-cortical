@@ -612,7 +612,10 @@ Core comparison:
 
 Optional extra baseline (add only if time allows):
 
-- MWF with automatic marking (RELAX-style)
+- MWF with automatic marking (RELAX-style). Implemented (`adr.baselines.mwf_auto`);
+  its muscle slope threshold was calibrated on Section A Set A (5 % false
+  marks on artifact-free data) and frozen at +0.777, because the RELAX
+  default (-0.59) marked most windows at 128 Hz (decided 2026-10-15).
 
 ### 11.1 ICA + ICLabel specification
 

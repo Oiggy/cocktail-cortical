@@ -366,6 +366,21 @@ Milestones follow PROJECT_PLAN.md §17.
     Section A grid (8 subjects x 2 conditions x 6 SNR x 5 SAR x 4 types =
     1920 recordings per set) is ~21 h of ICA per set on one core.
 
+- **RELAX-style calibration (item 14 decided 2026-10-15: option b):** the
+  muscle slope threshold was calibrated on Section A Set A to mark 5 % of
+  artifact-free windows (median over the 8 Set A subjects of each subject's
+  95th percentile of the flattest-channel 7-60 Hz log-log slope) and frozen
+  at **+0.777** in `configs/baselines.yaml` (RELAX default -0.59 marked
+  46-90 % of artifact-free windows; per-subject marking at the calibrated
+  value 0.3-13 %). Set A check (8 subjects) with injected phantom muscle:
+  sensitivity 0.77 (SAR -10) / 0.60 (SAR 0) at 5.6 % false marks (default
+  0.97 / 0.94 at 69 %). `scripts/13_calibrate_relax.py`; never re-run after Set B.
+  - Re-run on S4: muscle marks now 4 % (no muscle injected) to 15-18 %
+    (muscle injected). Auto-MWF error is nearly unchanged (whole recording
+    0.55-0.72, 1-9 Hz): its distortion comes from applying the MWFs to the
+    whole recording (RELAX design), not from over-marking - the proposed
+    methods change only flagged samples (single MWF, oracle: 0.22-0.32).
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -543,7 +558,7 @@ the code does not state them.
     120 s TRFs 0.29-0.94 with lambda 0.2 vs 0.15-0.48 with the Das rule
     across 0 to -25 dB.
 12. **Detector domain gap - DECIDED (c), see Done.**
-14. **RELAX-style baseline at 128 Hz (decide before milestone 9).** The
+14. **RELAX-style baseline - DECIDED (b), calibrated threshold frozen; see Done.** Original note: The
     RELAX muscle threshold (log-log slope > -0.59) marks ~70-84 % of windows
     in Section A, including artifact-free data. Options: (a) keep the RELAX
     defaults and report the miscalibration (faithful to RELAX, but a weak
@@ -574,7 +589,6 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Decide item 14 (RELAX-style baseline calibration at 128 Hz).
 - Milestone 9: Section A tuning on Set A (detector variant + threshold,
   reconstruction settings), freeze, then Set B and cross-fit. (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).

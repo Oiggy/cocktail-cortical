@@ -33,6 +33,46 @@ def _iqr_threshold(x: np.ndarray, k: float) -> float:
     return q3 + k * (q3 - q1)
 
 
+def muscle_slopes(eeg: np.ndarray, fs: float, cfg: dict | None = None) -> np.ndarray:
+    """Per window, the flattest channel's log-log PSD slope in the muscle band (RELAX statistic)."""
+    cfg = cfg or load_yaml("baselines")["mwf_auto"]
+    win, step = int(cfg["window_s"] * fs), int(cfg["step_s"] * fs)
+    starts = np.arange(0, len(eeg) - win + 1, step)
+    lo, hi = cfg["muscle_slope_band_hz"]
+    hi = min(hi, fs / 2 - 1)
+    freqs, psd = scipy.signal.welch(np.stack([eeg[s:s + win] for s in starts]), fs=fs, nperseg=win, axis=1)
+    band = (freqs >= lo) & (freqs <= hi)
+    logf = np.log10(freqs[band])
+    logp = np.log10(psd[:, band] + 1e-30)
+    slope = ((logf - logf.mean())[None, :, None] * (logp - logp.mean(axis=1, keepdims=True))).sum(1) / \
+        ((logf - logf.mean()) ** 2).sum()
+    return slope.max(axis=1)
+
+
+def calibrate_muscle_threshold(subjects=None, target_rate: float = 0.05, snr_db: float = -10) -> tuple[float, dict]:
+    """Slope threshold marking `target_rate` of artifact-free Section A windows (Set A only).
+
+    Uses each Set A noise subject's synthetic recording without injected
+    artifacts (attend-left, `snr_db`); subjects are weighted equally (the
+    threshold is the median over subjects of each subject's (1 - target_rate)
+    quantile). Returns the threshold and per-subject details.
+    """
+    from adr.synth import dataset3 as d3
+
+    subjects = subjects or d3.load_noise_split()["set_a"]
+    base, lags, _ = d3.load_base_trfs()
+    per_subject = {}
+    for subject in subjects:
+        rec = d3.synthesize(d3.noise_source(subject), "L", snr_db, base, lags)
+        per_subject[subject] = muscle_slopes(rec.eeg, 128.0)
+    quantiles = {s: float(np.quantile(v, 1 - target_rate)) for s, v in per_subject.items()}
+    threshold = float(np.median(list(quantiles.values())))
+    details = {"quantile_per_subject": quantiles,
+               "marked_at_threshold": {s: float(np.mean(v > threshold)) for s, v in per_subject.items()},
+               "marked_at_relax_default": {s: float(np.mean(v > -0.59)) for s, v in per_subject.items()}}
+    return threshold, details
+
+
 def heuristic_flags(eeg: np.ndarray, fs: float, ch_names, cfg: dict | None = None) -> tuple[dict, np.ndarray]:
     """Per-window flags {'ocular', 'muscle', 'extreme'} and window starts (s)."""
     cfg = cfg or load_yaml("baselines")["mwf_auto"]
@@ -44,17 +84,9 @@ def heuristic_flags(eeg: np.ndarray, fs: float, ch_names, cfg: dict | None = Non
     frontal = scipy.signal.sosfiltfilt(sos, frontal)
     fp_ptp = np.array([np.ptp(frontal[s:s + win]) for s in starts])
     ptp = np.array([np.ptp(eeg[s:s + win], axis=0) for s in starts])           # windows x channels
-    lo, hi = cfg["muscle_slope_band_hz"]
-    hi = min(hi, fs / 2 - 1)
-    freqs, psd = scipy.signal.welch(np.stack([eeg[s:s + win] for s in starts]), fs=fs, nperseg=win, axis=1)
-    band = (freqs >= lo) & (freqs <= hi)
-    logf = np.log10(freqs[band])
-    logp = np.log10(psd[:, band] + 1e-30)                                       # windows x f x channels
-    slope = ((logf - logf.mean())[None, :, None] * (logp - logp.mean(axis=1, keepdims=True))).sum(1) / \
-        ((logf - logf.mean()) ** 2).sum()
     flags = {
         "ocular": fp_ptp > _iqr_threshold(fp_ptp, cfg["blink_iqr_k"]),
-        "muscle": (slope > cfg["muscle_slope_threshold"]).any(axis=1),
+        "muscle": muscle_slopes(eeg, fs, cfg) > cfg["muscle_slope_threshold"],
         "extreme": (ptp > _iqr_threshold(ptp.ravel(), cfg["extreme_iqr_k"])).any(axis=1),
     }
     return flags, starts / fs
