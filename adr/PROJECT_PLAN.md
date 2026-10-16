@@ -369,7 +369,10 @@ Only flagged samples are corrected. Clean samples are left untouched.
   for every pipeline.
 - Tuning: all hyperparameters (MWF lags, rank, regularization; ridge
   penalties; neighbour count; detector threshold) tuned **only** on Section A
-  Set A, then frozen.
+  Set A, then frozen. **Objective (decided 2026-10-15):** primary = mean
+  median short-term TRF relative MSE over a tuning sub-grid (SNR -5/-15/-25,
+  SAR -10/0/+10, all four types, both conditions, 8 Set A subjects);
+  secondary = 1-30 Hz relative RMS error over the recording.
 - Implemented (milestone 7, `adr.reconstruction`): spatial interpolation
   first finds the contaminated channels in each flagged window (robust z of
   20-60 Hz power for muscle, of the largest first difference for pops) and
@@ -512,7 +515,10 @@ Envelope:
 
 - **TRF weights:**
   - Short-term TRFs within each 120 s trial (19 trials per condition, 38
-    total), ridge lambda = 0.2.
+    total), ridge lambda = 0.2. **Decided 2026-10-15:** Das et al.'s rule
+    (penalty = max |X'X| per trial) as the primary; lambda 0.2 (essentially
+    unregularised in the mTRF convention) as a sensitivity check. With
+    native transients cut, 18-19 trials per condition.
   - Figure: one trial, channel C5, every pipeline overlaid on the true base
     TRF (style of Das et al. Fig. 3).
   - Topoplots at the reference lag per pipeline.

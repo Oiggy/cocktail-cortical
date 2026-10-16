@@ -34,7 +34,7 @@ def recovery(rec: d3.SynthRecording, base: np.ndarray, cfg: dict, trial_seconds:
     out = {"long_term": relative_mse(ridge.fit([env], [eeg], FS, cfg["tmin"], cfg["tmax"], "das").weights, base)}
     short = {"short_0.2": [], "short_das": []}
     for cut in d3.cut_trials(len(eeg), trial_seconds):
-        for key, lam in (("short_0.2", cfg["lambda_short"]), ("short_das", "das")):
+        for key, lam in (("short_0.2", cfg.get("lambda_short_check", 0.2)), ("short_das", "das")):
             short[key].append(relative_mse(ridge.fit([env[cut]], [eeg[cut]], FS, cfg["tmin"], cfg["tmax"], lam).weights, base))
     out.update({k: float(np.median(v)) for k, v in short.items()})
     out["n_trials"] = len(short["short_das"])

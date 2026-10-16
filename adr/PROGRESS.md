@@ -381,6 +381,32 @@ Milestones follow PROJECT_PLAN.md §17.
     whole recording (RELAX design), not from over-marking - the proposed
     methods change only flagged samples (single MWF, oracle: 0.22-0.32).
 
+- **Milestone 9 - in progress (started 2026-10-15):**
+  - Decisions: item 11 Das rule for short-term TRFs (lambda 0.2 as a
+    check); item 9 forward prediction 2-fold within subject (story part
+    out; trials straddling two parts are left out under the stimulus
+    rule); tuning objective = mean median short-term TRF relMSE, ties
+    within 1 % broken by 1-30 Hz RRMSE; tuning sub-grid SNR -5/-15/-25,
+    SAR -10/0/+10, 4 types, both conditions (576 recordings per config).
+  - `adr.evaluation.section_a` (scenario build, detector scores cached per
+    recording, proposed / oracle-MWF pipelines, TRF / signal / detection /
+    forward-prediction outcomes), `adr.evaluation.tuning` (5-stage
+    coordinate descent, freeze to `configs/frozen/`),
+    `adr.evaluation.test_set` (full grid, all §11 pipelines - not run until
+    Set A is frozen), `scripts/14_tune_section_a.py`,
+    `scripts/15_evaluate_section_a.py`.
+  - Speed: FFT-based FIR filtfilt (identical to scipy.signal.filtfilt to
+    1e-9) and cached clean-band filtering cut evaluation from 9.5 s to
+    1.6 s per recording.
+  - First look (S4, ocular, SNR -15, SAR -10, raw detector, thresholds
+    0.85): TRF relMSE raw 0.23 -> proposed 0.16 (clean 0.16); 1-30 Hz
+    RRMSE 1.76 -> 0.49; but only 12 % of injected ocular windows were
+    classed ocular and the 50 % over-cleaning cap was binding - the
+    thresholds and cap are what tuning sets.
+  - Set A tuning launched (est. 8-10 h, 5 workers).
+  - Compute note for Set B: ICA (~40 s) dominates; full grid 1920
+    recordings per set -> roughly 10 h with 4-5 workers.
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -540,7 +566,8 @@ the code does not state them.
    `EOG-R` for the EOG-based ocular labels? What are EXG7 and EXG8?
 8. **Subjects.** All 13 are included and nothing is excluded in code. Should
    any be excluded? (sub-08 has the longest recording, 4066 s.)
-9. **Section A groups.** With your grouping rule, Dataset I has only 4
+9. **Section A groups - DECIDED 2026-10-15: 2-fold within each noise
+   subject, leaving one story part out, separate L/R TRFs.** Original note: With your grouping rule, Dataset I has only 4
    groups (one per story part), and each subject's HRTF trials cover just
    2 of them (~19.3 min each). Within-subject leave-one-group-out is
    therefore 2-fold, replacing the plan's 38-fold leave-one-trial-out. Is
@@ -549,7 +576,9 @@ the code does not state them.
 10. **`../dataset/cocktail/predictors`.** This folder exists next to
     `bids/derivatives/predictors`, but no code reads or writes it. Is it
     stale?
-11. **Short-term TRF lambda (Section A, needed at milestone 9).** The plan
+11. **Short-term TRF lambda - DECIDED 2026-10-15: Das rule (penalty =
+    max |X'X| per trial); lambda 0.2 reported as a sensitivity check.**
+    Original note: The plan
     sets lambda = 0.2 for the 120 s short-term TRFs. In the mTRF convention
     that is essentially no regularisation (the long-term TRF zig-zagged
     with it). Keep 0.2 as written, or use Das et al.'s per-trial rule
@@ -589,6 +618,6 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Milestone 9: Section A tuning on Set A (detector variant + threshold,
-  reconstruction settings), freeze, then Set B and cross-fit. (Section A), then 10 (Section B), 11 (ablations and
+- Milestone 9: finish Set A tuning, freeze, evaluate Set B; then tune on
+  Set B and evaluate Set A (cross-fit). (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).

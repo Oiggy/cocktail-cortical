@@ -62,3 +62,11 @@ def test_section_a_subject():
     np.testing.assert_allclose(eeg.mean(0), 0, atol=1e-8)
     np.testing.assert_allclose(eeg.std(0), 1, atol=1e-8)
     assert {t.group for t in trials} <= {1, 2, 3, 4} and len({t.group for t in trials}) == 2
+
+
+def test_fir_filtfilt_matches_scipy():
+    rng = np.random.default_rng(3)
+    x = rng.standard_normal((5000, 6)).cumsum(axis=0)
+    taps = das.bandpass_taps()
+    np.testing.assert_allclose(das.fir_filtfilt(taps, x), scipy.signal.filtfilt(taps, [1.0], x, axis=0),
+                               rtol=1e-9, atol=1e-9 * np.abs(x).max())

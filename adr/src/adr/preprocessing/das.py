@@ -56,9 +56,28 @@ def bandpass_taps(fs: float = FS_IN) -> np.ndarray:
     raise RuntimeError("No equiripple design met the spec")
 
 
+def fir_filtfilt(taps: np.ndarray, data: np.ndarray) -> np.ndarray:
+    """Zero-phase FIR filtering along axis 0, equal to scipy/MATLAB filtfilt.
+
+    Same odd-extension padding as filtfilt (3 x number of taps); the start-up
+    transient of each pass decays within the padding, which is discarded, so
+    the result matches filtfilt to numerical precision - but uses FFT
+    convolution (~20x faster for 181 taps on 64 channels).
+    """
+    pad = 3 * len(taps)
+    x = np.asarray(data, dtype=np.float64)
+    if len(x) <= pad:
+        return scipy.signal.filtfilt(taps, [1.0], x, axis=0)
+    ext = np.concatenate([2 * x[:1] - x[pad:0:-1], x, 2 * x[-1:] - x[-2:-pad - 2:-1]])
+    kernel = taps.reshape(-1, *([1] * (x.ndim - 1)))
+    y = scipy.signal.oaconvolve(ext, kernel, axes=0)[: len(ext)]
+    y = scipy.signal.oaconvolve(y[::-1], kernel, axes=0)[: len(ext)][::-1]
+    return y[pad:pad + len(x)]
+
+
 def bandpass(data: np.ndarray, fs: float = FS_IN) -> np.ndarray:
     """1-9 Hz zero-phase band-pass along axis 0 (filtfilt, as in MATLAB)."""
-    return scipy.signal.filtfilt(bandpass_taps(fs), [1.0], data, axis=0)
+    return fir_filtfilt(bandpass_taps(fs), data)
 
 
 def decimate(data: np.ndarray, fs_in: float = FS_IN, fs_out: float = FS_OUT) -> np.ndarray:

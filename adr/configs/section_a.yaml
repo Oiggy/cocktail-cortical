@@ -3,7 +3,9 @@
 trf:
   tmin: 0.0         # s; lags 0-400 ms = 14 samples at 32 Hz (Das et al. 2020)
   tmax: 0.4
-  lambda_short: 0.2 # short-term TRFs within each 120 s trial (plan §9.4)
+  lambda_short: das # short-term TRFs per 120 s trial: Das et al.'s rule (open item 11,
+                    # decided 2026-10-15); lambda 0.2 (plan) reported as a sensitivity check
+  lambda_short_check: 0.2
   # Long-term TRFs (plan §9.2 step 1): Das et al.'s rule - penalty = max |X'X|
   # (adr.trf.ridge.das_lambda). lambda = 0.2 left the TRF essentially
   # unregularised: weights alternated sign lag to lag (roughness 3.1 vs 1.2)
@@ -22,3 +24,19 @@ trial_seconds: 120                   # short-term TRF trials (plan §9.4)
 # (max 3 %), 18-19 x 120 s trials per condition kept; 200 uV would cut a
 # median 33 % (S9: 77 %). null = no cutting, score everything.
 native_transient_ptp_uv: 500
+
+# Forward prediction (open item 9, decided 2026-10-15): 2-fold within each
+# noise subject, leaving one story part out (presentation_groups), separate
+# attend-left / attend-right TRFs.
+forward_cv: story_part_2fold
+
+# Set A tuning objective (decided 2026-10-15): primary = mean over recordings
+# of the median short-term TRF relative MSE (Eq. 14-15); secondary = 1-30 Hz
+# relative RMS error over the recording (native transients excluded), so
+# settings that only affect > 9 Hz (muscle) are constrained too.
+tuning:
+  primary: trf_relmse
+  secondary: rrmse_1_30
+  snr_db: [-5, -15, -25]       # tuning sub-grid (full grid used for Set B evaluation)
+  sar_db: [-10, 0, 10]
+  types: [ocular, muscle, motion, pop]
