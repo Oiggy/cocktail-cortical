@@ -637,6 +637,10 @@ Optional extra baseline (add only if time allows):
 - Section B: run ICLabel at 250 Hz or higher so the full 1 to 100 Hz band is
   available.
 - Report the number and classes of removed components per subject.
+- **VERIFIED 2026-10-15 (mne-icalabel 0.10.0):** requirements as stated
+  above; implemented with picard (`ortho=False, extended=True`),
+  n_components = data rank (63), `adr.baselines.ica_iclabel`. At 128 Hz
+  ICLabel labels ~11 background components per recording as muscle.
 - Note: ICLabel is itself a neural-network classifier. It is allowed here
   because it is a baseline, not part of the proposed method.
 

@@ -46,8 +46,18 @@ def rrmse(estimate: np.ndarray, truth: np.ndarray, mask=None) -> float:
     return float(np.sqrt(((estimate - truth) ** 2).mean()) / np.sqrt((truth ** 2).mean()))
 
 
+def avgref(x: np.ndarray) -> np.ndarray:
+    return x - x.mean(axis=1, keepdims=True)
+
+
 def run(subject: str | None = None, snr_db: float = -10, sar_db: float = 0, bank_name: str = "phantom_set_a_templates",
-        seed: int = 0) -> pd.DataFrame:
+        seed: int = 0, baselines: bool = False) -> pd.DataFrame:
+    """Oracle-flag comparison; `baselines=True` adds ICA + ICLabel and the automatic MWF.
+
+    Broadband errors are computed after average-referencing every output (ICA
+    returns average-referenced data); the 1-9 Hz errors are in the Cz-referenced
+    analysis space, so neither depends on the output's reference.
+    """
     det = load_yaml("detection")
     fs, window_s, step_s = 128.0, det["window_s"], det["step_s"]
     base, lags, _ = d3.load_base_trfs()
@@ -71,14 +81,26 @@ def run(subject: str | None = None, snr_db: float = -10, sar_db: float = 0, bank
             "routed (oracle flags)": router.route(inj.eeg, fs, names, flags, starts, window_s).eeg,
             "single MWF (oracle flags)": router.single_mwf(inj.eeg, art_mask).eeg,
         }
+        extra = {}
+        if baselines:
+            from adr.baselines import ica_iclabel, mwf_auto
+            ica = ica_iclabel.run(inj.eeg, fs, names)
+            for thr, res in ica.items():
+                outputs[f"ICA+ICLabel (p>={thr})"] = res.eeg
+                extra[f"ICA+ICLabel (p>={thr})"] = {"removed": str(res.removed_by_class())}
+            auto, info = mwf_auto.run(inj.eeg, fs, names)
+            outputs["auto-MWF (RELAX-style)"] = auto
+            extra["auto-MWF (RELAX-style)"] = {"marked": f"muscle {info['fraction_muscle']:.2f}, blink {info['fraction_ocular']:.2f}"}
         for name, out in outputs.items():
             out_an = d3.analysis_space(out)
             rows.append({"subject": subject, "sar_db": sar_db, "type": kind, "pipeline": name, "events": len(inj.log),
                          "fraction_flagged": float(art_mask.mean()),
-                         "rrmse_broadband_flagged": rrmse(out, rec.eeg, art_mask),
+                         **extra.get(name, {}),
+                         "rrmse_broadband_flagged": rrmse(avgref(out), avgref(rec.eeg), art_mask),
                          "rrmse_analysis_flagged": rrmse(out_an, clean_an, art_mask),
                          "rrmse_analysis_all": rrmse(out_an, clean_an),
-                         "rrmse_broadband_flagged_excl_native": rrmse(out, rec.eeg, art_mask & ~native),
+                         "rrmse_broadband_flagged_excl_native": rrmse(avgref(out), avgref(rec.eeg), art_mask & ~native),
+                         "rrmse_analysis_all_excl_native": rrmse(out_an, clean_an, ~native),
                          "rrmse_analysis_flagged_excl_native": rrmse(out_an, clean_an, art_mask & ~native)})
             r = rows[-1]
             log.info("%s SAR %+d %-6s %-26s RRMSE flagged 1-9 Hz %.3f (excl. native %.3f), broadband %.3f (excl. native %.3f)",

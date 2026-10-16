@@ -330,6 +330,42 @@ Milestones follow PROJECT_PLAN.md §17.
   - Limitation to report: moderate native activity (200-500 uV) remains in
     the base and is counted as "clean".
 
+- **Milestone 8 - comparison methods (2026-10-15):**
+  - `adr.baselines.ica_iclabel`, `adr.baselines.mwf_auto`,
+    `configs/baselines.yaml`, `scripts/11_reconstruction_check.py
+    --baselines`, `notebooks/07_baselines.ipynb`, tests.
+  - **VERIFIED (§11.1):** mne-icalabel 0.10.0 expects a CAR copy band-passed
+    1-100 Hz and extended infomax, accepting `ICA(method="infomax",
+    fit_params=dict(extended=True))` or `ICA(method="picard",
+    fit_params=dict(ortho=False, extended=True))`; it warns (does not fail)
+    otherwise; onnx backend available. Implemented with picard
+    (non-orthogonal, extended), fit on a CAR copy filtered 1-63 Hz at
+    128 Hz (limitation), n_components = data rank (63; `rank="info"` wrongly
+    gave 64 - fixed), removal at p >= 0.7 for eye blink / muscle / heart /
+    line noise / channel noise, plus 0.5 and 0.9; unmixing applied to the
+    pipeline's own CAR data. ~41 s per 38 min recording (picard).
+  - Automatic MWF, RELAX-style: IQR-based blink marks on the frontal mean,
+    muscle marks from the log-log PSD slope (7-60 Hz > -0.59), extreme
+    outliers, sequential MWFs (muscle, blink) applied to the whole
+    recording; `heuristic_flags` doubles as the §12 "heuristic flags".
+  - S4 comparison (-10 dB SNR, natives excluded; proposed methods with
+    oracle flags), 1-9 Hz relative RMS error over flagged samples, SAR
+    -10 dB: ocular none 5.25 / routed 0.75 / single MWF 0.69 / ICA 2.51 /
+    auto-MWF 0.65; muscle 2.02 / 0.58 / 0.57 / 2.01 / 0.73; motion 4.91 /
+    0.58 / 0.58 / 4.91 / 0.68; pop 0.29 / 0.15 / 0.33 / 0.66 / 0.64.
+    Whole-recording error shows the cost of changing clean data: e.g. pop
+    at 0 dB none 0.04, routed 0.06, ICA 0.63, auto-MWF 0.55.
+  - ICA + ICLabel removes ~11 "muscle artifact" and ~3 "channel noise"
+    components in every recording regardless of the injected type (at
+    128 Hz ICLabel labels background components as muscle); thresholds
+    0.5/0.9 barely change it.
+  - The RELAX muscle rule marks 77-84 % of windows (69 % even on the
+    artifact-free recording): the -0.59 slope default is miscalibrated at
+    128 Hz. See "Still open" item 14.
+  - Compute note for milestone 9: ICA is ~40 s per recording; the full
+    Section A grid (8 subjects x 2 conditions x 6 SNR x 5 SAR x 4 types =
+    1920 recordings per set) is ~21 h of ICA per set on one core.
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -507,6 +543,14 @@ the code does not state them.
     120 s TRFs 0.29-0.94 with lambda 0.2 vs 0.15-0.48 with the Das rule
     across 0 to -25 dB.
 12. **Detector domain gap - DECIDED (c), see Done.**
+14. **RELAX-style baseline at 128 Hz (decide before milestone 9).** The
+    RELAX muscle threshold (log-log slope > -0.59) marks ~70-84 % of windows
+    in Section A, including artifact-free data. Options: (a) keep the RELAX
+    defaults and report the miscalibration (faithful to RELAX, but a weak
+    baseline); (b) calibrate the slope threshold on Section A Set A (e.g. to
+    a fixed false-mark rate on the artifact-free recordings) and freeze it
+    before Set B - same tuning rights as the proposed method; (c) drop the
+    optional baseline.
 13. **Native transients - DECIDED (b) at 500 uV, see Done.** Original note: The MWF-cleaned v2.0 data still contain large transients
     (S4: 14 % of samples in 1 s windows with a channel > 200 uV
     peak-to-peak; up to 4 mV). Options: (a) exclude those windows from all
@@ -530,8 +574,7 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Milestone 8: ICA + ICLabel comparison pipeline (§11.1), then the optional
-  automatic-MWF baseline.
+- Decide item 14 (RELAX-style baseline calibration at 128 Hz).
 - Milestone 9: Section A tuning on Set A (detector variant + threshold,
   reconstruction settings), freeze, then Set B and cross-fit. (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).

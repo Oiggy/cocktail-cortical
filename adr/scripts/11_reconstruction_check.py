@@ -6,7 +6,9 @@ subject, one artifact type at a time, at SAR 0 and -10 dB, given the true
 notebooks/06_reconstruction.ipynb). Writes
 results/section_a/reconstruction_check.csv and a log.
 
-    python scripts/11_reconstruction_check.py [SUBJECT]
+    python scripts/11_reconstruction_check.py [SUBJECT] [--baselines]
+
+--baselines adds ICA + ICLabel (milestone 8) and the automatic MWF.
 """
 import logging
 import sys
@@ -21,6 +23,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s",
                         handlers=[logging.StreamHandler(), logging.FileHandler(out_dir / "reconstruction_check.log", mode="w")])
     logging.getLogger("adr.reconstruction_check").info("package versions: %s", package_versions())
-    subject = sys.argv[1] if len(sys.argv) > 1 else None
-    table = pd.concat([check.run(subject, sar_db=sar) for sar in (0, -10)])
+    baselines = "--baselines" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    subject = args[0] if args else None
+    table = pd.concat([check.run(subject, sar_db=sar, baselines=baselines) for sar in (0, -10)])
     table.to_csv(out_dir / "reconstruction_check.csv", index=False)
