@@ -116,3 +116,45 @@ def dataset1_clean_flag_rates(subjects=None, variant: str = "raw", models=("ligh
                 rows.append({"subject": subject, "variant": variant, "model": model_name, "target": target,
                              "flag_rate": float(np.mean(score >= M.DEFAULT_THRESHOLD[model_name]))})
     return pd.DataFrame(rows)
+
+
+# Within-recording test: windows of one phantom recording labelled from the
+# broadcast artifact-source waveforms (adr.io.phantom.source_activity).
+WITHIN = {  # condition -> [(detector target, source label)]
+    "Eyes": [("ocular", "saccade"), ("ocular", "blink")],
+    "Facial": [("muscle", "facial")],
+    "All": [("ocular", "saccade"), ("muscle", "facial")],
+}
+
+
+def within_recording(rates=None, models=("lightgbm", "lda"), variants=("raw", "norm"),
+                     pool: str = "phantom_check") -> pd.DataFrame:
+    """AUC of each detector for source-on vs source-off windows *within* a phantom recording.
+
+    Unlike the condition-level test this is valid for the `norm` variant too.
+    Blinks occur about once per second, so nearly every 1 s window contains
+    one (little contrast); saccades and facial bursts are intermittent.
+    """
+    cfg = features.detection_config()
+    rows = []
+    for fs in rates or [float(r) for r in cfg["rates"]]:
+        for condition, pairs in WITHIN.items():
+            trial = phantom.load_trial(condition)
+            span = phantom.pool_slice(pool, trial.sfreq, len(trial.eeg))
+            labels = phantom.source_activity(trial.ground_truth[span], trial.sfreq, cfg["window_s"], cfg["step_s"])
+            X_raw = phantom_features(condition, fs, pool)
+            n = min(len(X_raw), len(labels))
+            for variant in variants:
+                X = features.apply_variant(X_raw, variant)[:n]
+                for model_name in models:
+                    for target, source in pairs:
+                        y = labels[source].to_numpy()[:n]
+                        if y.all() or not y.any():
+                            continue
+                        score = M.score(model_name, load_model(fs, model_name, target, variant), X)
+                        rows.append({"rate": int(fs), "variant": variant, "model": model_name, "condition": condition,
+                                     "target": target, "source": source, "source_on_fraction": float(y.mean()),
+                                     "auc_within": roc_auc_score(y, score)})
+                        log.info("%d Hz %-4s %-8s %-6s %-6s vs %-7s (on %.2f) within-recording AUC %.3f", fs, variant,
+                                 model_name, condition, target, source, y.mean(), rows[-1]["auc_within"])
+    return pd.DataFrame(rows)

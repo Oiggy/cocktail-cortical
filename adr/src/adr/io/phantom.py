@@ -19,6 +19,7 @@ import mne
 import numpy as np
 import pandas as pd
 import scipy.io
+import scipy.ndimage
 import scipy.signal
 import yaml
 
@@ -124,3 +125,32 @@ def pool_slice(pool: str, sfreq: float, n_samples: int) -> slice:
     """Sample range of a phantom pool within a trial (splits/phantom.yaml)."""
     start, stop = load_split()["pools"][pool]
     return slice(int(round(start * sfreq)), min(int(round(stop * sfreq)), n_samples))
+
+
+def source_activity(ground_truth: np.ndarray, sfreq: float, window_s: float, step_s: float,
+                    cfg: dict | None = None) -> pd.DataFrame:
+    """Window-level activity of the broadcast artifact sources (one shared GT file).
+
+    Per window: `blink` (ch11 rises above its running median by
+    `blink_threshold`), `saccade` (ch12 deviates from its running median by
+    `saccade_threshold`), `facial` (RMS of the mean rectified ch17-20 above
+    `facial_rms_threshold`). Neck EMG and the motion platform run
+    continuously, so they have no within-recording contrast and are not
+    returned here. Thresholds live in configs/injection.yaml.
+    """
+    from adr.config import load_yaml
+
+    cfg = cfg or load_yaml("injection")["phantom_labels"]
+    k = int(cfg["baseline_window_s"] * sfreq) | 1
+    blink = ground_truth[:, 10] - scipy.ndimage.median_filter(ground_truth[:, 10], size=k, mode="nearest")
+    saccade = ground_truth[:, 11] - scipy.ndimage.median_filter(ground_truth[:, 11], size=k, mode="nearest")
+    facial = np.abs(ground_truth[:, 16:20]).mean(axis=1)
+    win, step = int(round(window_s * sfreq)), int(round(step_s * sfreq))
+    starts = np.arange(0, len(ground_truth) - win + 1, step)
+    rows = []
+    for s0 in starts:
+        span = slice(s0, s0 + win)
+        rows.append((s0 / sfreq, blink[span].max() > cfg["blink_threshold"],
+                     np.abs(saccade[span]).max() > cfg["saccade_threshold"],
+                     np.sqrt((facial[span] ** 2).mean()) > cfg["facial_rms_threshold"]))
+    return pd.DataFrame(rows, columns=["start", "blink", "saccade", "facial"])

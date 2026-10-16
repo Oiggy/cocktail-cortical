@@ -486,6 +486,12 @@ Envelope:
    - Signal-to-artifact ratio (SAR): -10 to +10 dB, same 20 x log10 RMS definition.
    - Log every injected artifact (type, onset, offset, channels, SAR). This
      log is the ground truth for detection scoring.
+   - Implemented (milestone 6, `adr.synth.templates`, `adr.synth.inject`):
+     brain removal by lagged regression on the broadcast brain sources
+     (fitted on brain-only; phantom noise floor 6.8 uV, motion field only
+     ~0.5 dB above it); one artifact type per recording; Poisson onsets
+     (~3.4/min effective) with 1 s gaps; SAR on channel-mean RMS ("all"),
+     affected-channel for pops; config in `configs/injection.yaml`.
 7. Processing order: inject artifacts -> run pipeline (detect + reconstruct,
    or baseline) -> 1 to 9 Hz, 32 Hz, Cz reference, z-score -> TRF analysis.
 

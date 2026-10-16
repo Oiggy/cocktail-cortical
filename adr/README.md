@@ -34,7 +34,8 @@ both give identical results.
 | Data checks (VERIFY items) | `02_verify_dataset1.py`, `04_verify_openneuro.py` | `notebooks/01_data_checks.ipynb` |
 | Long-term TRF (milestone 3) | `05_long_term_trf.py` | `notebooks/02_long_term_trf.ipynb` |
 | Dataset III synthesis (milestone 4) | `06_synthesize_dataset3.py` | `notebooks/03_dataset3_synthesis.ipynb` |
-| Detectors (milestone 5) | `07_extract_features.py`, `08_train_detectors.py`, `09_phantom_transfer.py` | `notebooks/04_detectors.ipynb` |
+| Detectors (milestone 5) | `07_extract_features.py`, `08_train_detectors.py [--variant norm]`, `09_phantom_transfer.py` | `notebooks/04_detectors.ipynb` |
+| Templates and injection (milestone 6) | `10_build_templates.py` | `notebooks/05_templates_injection.ipynb` |
 
 Scripts: from `adr/`, run e.g. `python scripts/05_long_term_trf.py` with the
 `adr` environment active. Later steps read earlier outputs (milestone 4

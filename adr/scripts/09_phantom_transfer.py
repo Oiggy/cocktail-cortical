@@ -1,7 +1,8 @@
 """Milestone 5c: detector transfer to the phantom (PROJECT_PLAN.md §7).
 
 Logic lives in adr.detection.transfer (also used by notebooks/04_detectors.ipynb).
-Writes results/detectors/phantom_transfer.{csv,png} and a log.
+Writes results/detectors/phantom_transfer[_norm].{csv,png},
+phantom_within_recording.csv and a log.
 
     python scripts/09_phantom_transfer.py
 """
@@ -28,3 +29,5 @@ if __name__ == "__main__":
     table = transfer.run(models=args.models or transfer.M.MODELS, variant=args.variant)
     table.to_csv(out_root / f"phantom_transfer{suffix}.csv", index=False)
     transfer.plot(table).savefig(out_root / f"phantom_transfer{suffix}.png", dpi=150)
+    # Within-recording test (labels from the broadcast artifact sources; valid for both variants).
+    transfer.within_recording().to_csv(out_root / "phantom_within_recording.csv", index=False)

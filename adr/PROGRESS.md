@@ -213,6 +213,54 @@ Milestones follow PROJECT_PLAN.md §17.
     from the broadcast artifact-source waveforms (GT channels 11-20).
   - Notebook 04 shows the comparison.
 
+- **Milestone 6 - templates and injection (2026-10-15):**
+  - `configs/injection.yaml`, `adr.synth.templates`, `adr.synth.inject`,
+    `adr.io.phantom.source_activity`, `scripts/10_build_templates.py`,
+    `notebooks/05_templates_injection.ipynb`.
+  - Phantom ground truth (authors' source map): ch11 eye blink (events
+    ~1/s), ch12 saccade (sparse), ch13-16 trapezius/SCM (continuous walking
+    EMG), ch17-20 masseter/temporalis (chewing bursts with quiet gaps). One
+    GT file for all conditions; sources switched on per condition.
+  - Window-level phantom labels from the source waveforms (thresholds in
+    config): blink in 97 % of 1 s windows, saccade 43 %, facial 57 %.
+    Neck and motion are continuous, so condition-level only.
+  - Phantom templates: lagged regression (lags -2..2 at 512 Hz) of the
+    scalp EEG on the 10 brain sources, fitted on the brain-only recording
+    (R^2 0.56 broadband), subtracted from each artifact recording; 128 ->
+    64 spline, average reference, 128 Hz; events cut per class (ocular
+    1-3 s from Eyes; muscle at facial-burst onsets + Neck chunks; motion
+    2-6 s from Walking), Set A 0-100 s / Set B 100-200 s pools. **Noise
+    floor 6.8 uV** (brain-only residual): facial field 19.7 uV (~+8.7 dB
+    above it), neck 11.6 / eyes 11.1 uV (~+2-3 dB), walking 9.9 uV
+    (~+0.5 dB) - motion templates are close to half sensor noise.
+    Limitation to report.
+  - PhysioMotion templates (Set A participants; Set B likewise): 62 ocular
+    (median 0.4 s), 200 muscle, 200 motion (capped), single-class events
+    only, muscle high-passed at 20 Hz (+ broadband bank for the ablation),
+    ocular low-passed 10 Hz, motion 5 Hz; 57 channels copied, 7 BioSemi
+    positions spline-interpolated.
+  - Injection: one artifact type per recording, Poisson onsets
+    (4/min nominal, 3.0-3.7/min effective with durations and 1 s gaps),
+    SAR = 20 log10(rms EEG under the event / rms artifact), channel-mean
+    RMS ("all"; "affected" for the ablation; pops always the affected
+    channel, never Cz). Verified on S4 at -10 dB SNR: every event hits its
+    SAR exactly; artifacts cover 7-23 % of the recording. Log columns:
+    type, onset_s, offset_s, channels, sar_db, gain, source.
+    `window_truth` turns a log into per-window labels for scoring.
+  - **Within-recording phantom transfer** (`transfer.within_recording`,
+    held-out pool): facial bursts detected with LightGBM AUC 0.93-0.99
+    (both variants, both rates, Facial and All recordings); blinks up to
+    1.00 (few blink-free windows); saccades weak (0.49-0.80). So the
+    detectors do find phantom artifacts within a recording; the
+    condition-level failure was a between-recording offset.
+  - Observation: the "clean" (MWF-cleaned) Dataset I EEG still contains
+    residual ocular activity (e.g. S4, Fp1, a ~-150 uV slow deflection at
+    31-33 s; notebook 05). This partly explains the detectors' high flag
+    rate on "clean" Dataset I, and it bears on the §16 limitation about the
+    MWF-cleaned base: detection is scored against the injection log only,
+    so detector hits on residual native artifacts count as false alarms.
+  - 54 tests pass (1 skipped).
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -405,9 +453,7 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Milestone 6: artifact template extraction (phantom primary, PhysioMotion
-  secondary) and injection with the injection log. Suggested addition:
-  window-level phantom labels from the broadcast artifact-source waveforms,
-  for a within-recording transfer test that can evaluate both variants.
-- Milestones 7-9 (Section A), then 10 (Section B), 11 (ablations and
+- Milestone 7: reconstruction methods (MWF, frontal-reference ridge,
+  learned spatial interpolation, router), with tests.
+- Milestones 8-9 (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).
