@@ -261,6 +261,48 @@ Milestones follow PROJECT_PLAN.md §17.
     so detector hits on residual native artifacts count as false alarms.
   - 54 tests pass (1 skipped).
 
+- **Milestone 7 - reconstruction (2026-10-15):**
+  - `adr.reconstruction.mwf` (GEVD MWF, Somers et al. 2018: R_yy on
+    flagged, R_nn on clean samples, low-rank gains (lambda-1)/(lambda-1+mu),
+    optional time lags, rank 'poseig' / 'eig>T' / integer, clean-baseline
+    centring), `ridge_frontal` (Fp1/Fp2/AF7/AF8 as EOG stand-ins, fitted on
+    ocular-flagged samples, centred on the clean baseline), `spatial_interp`
+    (contaminated channels per flagged window by robust z of a class score
+    - log 20-60 Hz power for muscle, log largest first difference for pops
+    - predicted from the k nearest good channels via ridge on the clean
+    covariance), `router` (per-class masks, over-cleaning cap keeping the
+    top-scoring windows, raised-cosine taper, MWF fallback when too many
+    channels are contaminated; `single_mwf` for the routing ablation and
+    the oracle baseline), `check` (oracle-flag sanity check),
+    `configs/reconstruction.yaml`, `scripts/11_reconstruction_check.py`,
+    `notebooks/06_reconstruction.ipynb`.
+  - Plan §4 rank-1 test passes (error on flagged samples 4.29 -> 0.13;
+    spatial pattern |cos| > 0.99). Unit tests for every module (62 pass).
+  - Bugs found and fixed on the way: ridge centred on the flagged samples
+    left a one-signed blink's mean behind; MWF applied to uncentred data;
+    interpolation with a near-zero ridge penalty amplified undetected
+    contamination in collinear neighbours to ~500 uV-3 mV (alpha 1e-3 ->
+    0.1); pops scored by variance were missed (step score instead).
+  - Starting values changed from the first draft (Set A only, S4): MWF rank
+    'poseig' kept 24-33 of 64 components from chance eigenvalues > 1 ->
+    'eig>4'; interpolation alpha 0.1. Formal tuning is milestone 9.
+  - **The "clean" Dataset I base contains native transients** (S4: up to
+    3.4 mV, AF8 4.1 mV peak-to-peak at ~2228 s; 10.6 % of 1 s windows have a
+    channel > 200 uV peak-to-peak; 14.2 % of samples inside such windows).
+    They inflate reconstruction error (removing them counts as error),
+    detector false alarms and the SNR noise RMS. See "Still open" item 13.
+  - Oracle-flag check (S4, -10 dB SNR, phantom Set A templates, native
+    transients excluded), relative RMS error over flagged samples, 1-9 Hz,
+    no correction -> routed / single MWF:
+    SAR -10 dB: ocular 5.27 -> 0.74 / 0.72; muscle 2.10 -> 0.66 / 0.64;
+    motion 5.07 -> 0.74 / 0.74; pop 0.27 -> **0.09 / 0.42**.
+    SAR 0 dB: ocular 1.67 -> 0.69 / 0.68; muscle 0.66 -> 0.58 / 0.54;
+    motion 1.61 -> 0.63 / 0.63; pop 0.085 -> 0.10 / 0.22.
+    Routing clearly wins for pops; muscle routes mostly fall back to MWF
+    (phantom chewing is widespread); ocular routing (MWF + frontal ridge)
+    is worse broadband than MWF alone (ridge adds error) - an
+    `ocular_method` tuning choice.
+
 ## Section B dataset (from the parent repo, read 2026-10-15)
 
 Sources: `analysis/biosemi64mod.txt`, `analysis/cortical_analysis_1.ipynb`
@@ -437,7 +479,16 @@ the code does not state them.
     preview on Set A subject S4 without artifacts: median relative MSE of
     120 s TRFs 0.29-0.94 with lambda 0.2 vs 0.15-0.48 with the Das rule
     across 0 to -25 dB.
-12. **Detector domain gap - DECIDED (c), see Done.** On clean Dataset I
+12. **Detector domain gap - DECIDED (c), see Done.**
+13. **Native transients in the "clean" Dataset I base (decide before
+    milestone 9).** The MWF-cleaned v2.0 data still contain large transients
+    (S4: 14 % of samples in 1 s windows with a channel > 200 uV
+    peak-to-peak; up to 4 mV). Options: (a) exclude those windows from all
+    Section A scoring (detection and reconstruction), with a threshold
+    sensitivity check - currently implemented as
+    `native_transient_ptp_uv: 200`; (b) also exclude them from the noise
+    used for synthesis (cut them out before time reversal), so SNR and the
+    background are cleaner; (c) score everything (plan as written). On clean Dataset I
     EEG the frozen detectors flag 40-66 % of windows at the default
     threshold, and LightGBM does not transfer to the phantom. Options:
     (a) tune only the threshold on Section A Set A (plan as written);
@@ -453,7 +504,9 @@ v2.0 and the phantom check (§9.5) - then the own-dataset loader and
 Section B (real-data validation). Still-open items 1-8 and 10 wait until
 Section B; items 9 and 11 are needed at Section A evaluation (milestone 9).
 
-- Milestone 7: reconstruction methods (MWF, frontal-reference ridge,
-  learned spatial interpolation, router), with tests.
-- Milestones 8-9 (Section A), then 10 (Section B), 11 (ablations and
+- Decide item 13 (native transients in the Dataset I base).
+- Milestone 8: ICA + ICLabel comparison pipeline (§11.1), then the optional
+  automatic-MWF baseline.
+- Milestone 9: Section A tuning on Set A (detector variant + threshold,
+  reconstruction settings), freeze, then Set B and cross-fit. (Section A), then 10 (Section B), 11 (ablations and
   statistics), 12 (figures).

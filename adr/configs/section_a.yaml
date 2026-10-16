@@ -13,3 +13,8 @@ base_channel: C5    # base TRF shape (plan §9.2 step 3)
 condition: hrtf     # keep only HRTF trials, repetitions included (plan §9.1)
 snr_db: [0, -5, -10, -15, -20, -25]  # plan §9.3 step 4 (verified range 0 to -25 dB)
 trial_seconds: 120                   # short-term TRF trials (plan §9.4)
+# Native transients in the "clean" (MWF-cleaned) Dataset I base: 1 s windows
+# where any channel exceeds this peak-to-peak are excluded from Section A
+# scoring (S4: 14 % of samples; up to 4 mV on AF8). Pending decision - see
+# PROGRESS.md "Still open" item 13. null = score everything.
+native_transient_ptp_uv: 200

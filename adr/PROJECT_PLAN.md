@@ -370,6 +370,13 @@ Only flagged samples are corrected. Clean samples are left untouched.
 - Tuning: all hyperparameters (MWF lags, rank, regularization; ridge
   penalties; neighbour count; detector threshold) tuned **only** on Section A
   Set A, then frozen.
+- Implemented (milestone 7, `adr.reconstruction`): spatial interpolation
+  first finds the contaminated channels in each flagged window (robust z of
+  20-60 Hz power for muscle, of the largest first difference for pops) and
+  predicts only those; windows with too many contaminated channels fall back
+  to MWF. MWF rank supports 'poseig', 'eig>T' and integers ('poseig' keeps
+  chance components; starting value 'eig>4'). Starting values in
+  `configs/reconstruction.yaml`.
 
 ## 9. Section A: semi-synthetic validation (Dataset I v2.0)
 
