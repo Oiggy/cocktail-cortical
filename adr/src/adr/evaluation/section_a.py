@@ -150,9 +150,9 @@ def trf_outcomes(eeg_out: np.ndarray, r: Recording, base: np.ndarray, cfg: dict 
 def signal_outcomes(eeg_out: np.ndarray, r: Recording, light: bool = False) -> dict:
     keep = ~r.native
     out_30, clean_30 = _cz_band(eeg_out, (1, 30)), r.clean_band("1_30")
-    out = {"rrmse_1_30": _rrmse(out_30, clean_30, keep)}
+    out = {"rrmse_1_30": _rrmse(out_30, clean_30, keep),
+           "rrmse_1_9": _rrmse(d3.analysis_space(eeg_out), r.clean_band("1_9"), keep)}
     if not light:
-        out["rrmse_1_9"] = _rrmse(d3.analysis_space(eeg_out), r.clean_band("1_9"), keep)
         out["spectral_rrmse_1_30"] = _spectral_rrmse(out_30, clean_30, keep)
     return out
 
@@ -168,7 +168,7 @@ def detection_outcomes(r: Recording, flags: dict) -> dict:
 
 
 def evaluate(eeg_out: np.ndarray, r: Recording, base: np.ndarray, fraction_modified: float, light: bool = False) -> dict:
-    """All outcomes; `light=True` (tuning) keeps only the Das-rule TRF and the 1-30 Hz error."""
+    """All outcomes; `light=True` (tuning) keeps only the Das-rule TRF and the 1-9 / 1-30 Hz errors."""
     return {**trf_outcomes(eeg_out, r, base, check=not light), **signal_outcomes(eeg_out, r, light),
             "fraction_modified": fraction_modified}
 

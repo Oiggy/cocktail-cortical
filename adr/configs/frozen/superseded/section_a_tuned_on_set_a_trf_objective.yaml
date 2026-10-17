@@ -1,0 +1,19 @@
+# SUPERSEDED 2026-10-16 before Set B was touched: tuned with the first objective
+# (TRF relMSE, ties by 1-30 Hz RRMSE), which rewarded over-cleaning. See PROGRESS.md.
+# Section A settings tuned on set_a (adr.evaluation.tuning), frozen.
+# Never change after the other set has been touched (PROJECT_PLAN.md §14).
+tuned_on: set_a
+config_name: s5_taper0.5_cap0.5
+variant: raw
+thresholds:
+  ocular: 0.85
+  muscle: 0.85
+  motion: 0.99
+  pop: 0.85
+reconstruction:
+  mwf.rank: eig>4
+  ocular_method: mwf+ridge
+  spatial_interp.n_neighbours: 12
+  spatial_interp.bad_z: 3.0
+  taper_s: 0.5
+  max_modified_fraction: 0.5

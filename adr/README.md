@@ -40,6 +40,7 @@ both give identical results.
 | Native-transient threshold check | `12_native_transients.py` | - |
 | Comparison methods (milestone 8) | `11_reconstruction_check.py --baselines`, `13_calibrate_relax.py` (run once, Set A) | `notebooks/07_baselines.ipynb` |
 | Section A tuning (milestone 9) | `14_tune_section_a.py set_a` (hours) | - |
+| Tuning review references (milestone 9) | `14b_tuning_references.py` (after tuning; ~1 h) | - |
 | Section A evaluation (milestone 9) | `15_evaluate_section_a.py set_b` (after tuning; hours) | - |
 
 Scripts: from `adr/`, run e.g. `python scripts/05_long_term_trf.py` with the

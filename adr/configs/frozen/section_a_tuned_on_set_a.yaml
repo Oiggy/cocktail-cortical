@@ -1,0 +1,17 @@
+# Section A settings tuned on set_a (adr.evaluation.tuning), frozen.
+# Never change after the other set has been touched (PROJECT_PLAN.md §14).
+tuned_on: set_a
+config_name: s5_taper0.5_cap0.5
+variant: raw
+thresholds:
+  ocular: 0.99
+  muscle: 0.95
+  motion: 0.95
+  pop: 0.95
+reconstruction:
+  mwf.rank: eig>8
+  ocular_method: mwf
+  spatial_interp.n_neighbours: 8
+  spatial_interp.bad_z: 5.0
+  taper_s: 0.5
+  max_modified_fraction: 0.5

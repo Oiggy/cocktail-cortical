@@ -369,10 +369,20 @@ Only flagged samples are corrected. Clean samples are left untouched.
   for every pipeline.
 - Tuning: all hyperparameters (MWF lags, rank, regularization; ridge
   penalties; neighbour count; detector threshold) tuned **only** on Section A
-  Set A, then frozen. **Objective (decided 2026-10-15):** primary = mean
-  median short-term TRF relative MSE over a tuning sub-grid (SNR -5/-15/-25,
-  SAR -10/0/+10, all four types, both conditions, 8 Set A subjects);
-  secondary = 1-30 Hz relative RMS error over the recording.
+  Set A, then frozen. **Objective (revised 2026-10-16, before Set B was
+  touched):** primary = mean 1-9 Hz relative RMS error between the cleaned
+  EEG and the artifact-free EEG (Cz reference, the TRF analysis band, native
+  transients excluded) over a tuning sub-grid (SNR -5/-15/-25, SAR
+  -10/0/+10, all four types, both conditions, 8 Set A subjects); settings
+  within 1 % of the best are ranked by the mean median short-term TRF
+  relative MSE. TRF relMSE stays the primary *outcome* of the Set B
+  evaluation. Reason: the first objective (TRF relMSE, ties by 1-30 Hz
+  RRMSE, decided 2026-10-15) rewarded over-cleaning - the tuned pipeline
+  scored below the artifact-free reference (pop 0.249 vs 0.264, SNR -25 dB
+  0.491 vs 0.502) while modifying ~42 % of samples (true artifact fraction
+  ~21 %), i.e. it was suppressing background EEG, which the TRF metric
+  counts as noise. That run is kept in
+  `results/section_a/tuning_set_a_trf_objective/`.
 - Implemented (milestone 7, `adr.reconstruction`): spatial interpolation
   first finds the contaminated channels in each flagged window (robust z of
   20-60 Hz power for muscle, of the largest first difference for pops) and

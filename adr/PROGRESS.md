@@ -386,7 +386,7 @@ Milestones follow PROJECT_PLAN.md §17.
     check); item 9 forward prediction 2-fold within subject (story part
     out; trials straddling two parts are left out under the stimulus
     rule); tuning objective = mean median short-term TRF relMSE, ties
-    within 1 % broken by 1-30 Hz RRMSE; tuning sub-grid SNR -5/-15/-25,
+    within 1 % broken by 1-30 Hz RRMSE (revised 2026-10-16, see below); tuning sub-grid SNR -5/-15/-25,
     SAR -10/0/+10, 4 types, both conditions (576 recordings per config).
   - `adr.evaluation.section_a` (scenario build, detector scores cached per
     recording, proposed / oracle-MWF pipelines, TRF / signal / detection /
@@ -404,6 +404,52 @@ Milestones follow PROJECT_PLAN.md §17.
     classed ocular and the 50 % over-cleaning cap was binding - the
     thresholds and cap are what tuning sets.
   - Set A tuning launched (est. 8-10 h, 5 workers).
+  - **First tuning run (TRF objective) finished 2026-10-16 06:34**, froze
+    raw / thresholds 0.85 (motion 0.99) / MWF eig>4 + ridge / 12
+    neighbours, z 3 / taper 0.5 s / cap 0.5. Configs differed by < 1 % on
+    TRF relMSE in every stage, so the 1-30 Hz tie-break made most choices.
+    Reference scores on the same grid (all 576 recordings, 8 subjects):
+
+    | | TRF relMSE | 1-30 Hz RRMSE | fraction modified |
+    |---|---|---|---|
+    | artifact-free | 0.264 | 0 | 0 |
+    | no correction | 0.310 | 0.731 | 0 |
+    | oracle single MWF | 0.274 | 0.197 | 0.205 |
+    | proposed (frozen) | 0.264 | 0.551 | 0.417 |
+
+    The proposed pipeline beat no correction for 8/8 subjects, but scored
+    *below* the artifact-free reference for pops (0.249) and at SNR -25 dB
+    (0.491 vs 0.502), with a 1-30 Hz error of 0.47 on pop recordings where
+    no correction is 0.055: it changes twice the true artifact fraction and
+    suppresses background EEG, which the TRF metric rewards.
+  - **Decision 2026-10-16 (user):** re-tune on Set A with primary = 1-9 Hz
+    RRMSE vs the artifact-free EEG, tie-break (within 1 %) = TRF relMSE.
+    TRF relMSE remains the primary Set B outcome. First run archived to
+    `results/section_a/tuning_set_a_trf_objective/` (frozen file
+    `configs/frozen/superseded/section_a_tuned_on_set_a_trf_objective.yaml`,
+    references in `references.csv`). Set B still untouched.
+  - **Re-tune (fidelity objective) finished 2026-10-16 22:34**, froze raw /
+    thresholds ocular 0.99, muscle / motion / pop 0.95 / MWF eig>8, ocular
+    MWF only (no ridge) / 8 neighbours, z 5 / taper 0.5 s / cap 0.5 (cap no
+    longer binding). Same grid, 576 recordings, 8 subjects:
+
+    | | 1-9 Hz RRMSE | TRF relMSE | fraction modified |
+    |---|---|---|---|
+    | no correction | 0.702 | 0.310 | 0 |
+    | proposed (frozen) | 0.396 | 0.280 | 0.195 |
+    | oracle single MWF | 0.223 | 0.275 | 0.205 |
+    | artifact-free | 0 | 0.264 | 0 |
+
+    TRF relMSE better than no correction for 8/8 subjects (Wilcoxon p =
+    0.008) and no longer below the artifact-free reference on average;
+    closes 65 % of the no-correction-to-artifact-free TRF gap (oracle MWF
+    76 %). Weak spots: pop recordings (1-9 Hz 0.174 vs 0.062 uncorrected)
+    and SAR +10 dB (0.240 vs 0.150) - false alarms on weak or absent
+    artifacts; stage 2 already searched pop thresholds 0.5-0.99.
+  - **Frozen 2026-10-17 (user approved)** -
+    `configs/frozen/section_a_tuned_on_set_a.yaml`; not to change from here
+    on. Set B evaluation (`scripts/15_evaluate_section_a.py set_b`)
+    started. References: `scripts/14b_tuning_references.py`.
   - Compute note for Set B: ICA (~40 s) dominates; full grid 1920
     recordings per set -> roughly 10 h with 4-5 workers.
 

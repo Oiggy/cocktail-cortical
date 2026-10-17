@@ -24,6 +24,18 @@ def test_select_uses_secondary_within_tolerance():
         "rrmse_1_30": [0.60, 0.60, 0.40, 0.40, 0.10, 0.10],       # c best secondary but too far on primary
         "fraction_modified": [0.1] * 6,
     })
+    best, summary = tuning.select(table, "trf_relmse", "rrmse_1_30")
+    assert best == "b" and list(summary.index)[0] == "a"
+
+
+def test_select_default_objective_is_fidelity_first():
+    table = pd.DataFrame({
+        "config": ["a", "b", "c"],
+        "rrmse_1_9": [0.300, 0.302, 0.40],    # b within 1 % of a on the primary
+        "trf_relmse": [0.27, 0.26, 0.20],     # c best TRF but too far on fidelity
+        "rrmse_1_30": [0.5, 0.5, 0.5],
+        "fraction_modified": [0.2] * 3,
+    })
     best, summary = tuning.select(table)
     assert best == "b" and list(summary.index)[0] == "a"
 

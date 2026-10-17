@@ -10,9 +10,12 @@ set's noise subjects and template pool:
 4. interpolation neighbours x contamination z, and the motion method;
 5. boundary taper x over-cleaning cap.
 
-Each configuration is scored by the mean over recordings of the median
-short-term TRF relative MSE (primary); configurations within 1 % of the
-best are ranked by the 1-30 Hz relative RMS error (secondary). Detector
+Each configuration is scored by the objective in configs/section_a.yaml
+(`tuning.primary`, `tuning.secondary`): since 2026-10-16 the mean 1-9 Hz
+relative RMS error against the artifact-free EEG (primary), with
+configurations within 1 % of the best ranked by the mean median short-term
+TRF relative MSE (secondary). The first objective (TRF relMSE, ties by
+1-30 Hz error) rewarded suppressing background EEG. Detector
 scores are computed once per recording and variant. The winner is written
 to configs/frozen/section_a_tuned_on_<set>.yaml and never changed after
 the test set is touched.
@@ -94,12 +97,16 @@ def evaluate_configs(configs: list[Config], subjects: list[str], tuning_set: str
     return pd.concat(tables, ignore_index=True)
 
 
-def select(table: pd.DataFrame) -> tuple[str, pd.DataFrame]:
-    """Best config: lowest mean TRF relMSE; within 1 % of it, lowest mean 1-30 Hz error."""
-    summary = table.groupby("config")[["trf_relmse", "rrmse_1_30", "fraction_modified"]].mean().sort_values("trf_relmse")
-    best_primary = summary["trf_relmse"].min()
-    near = summary[summary["trf_relmse"] <= best_primary * (1 + TOLERANCE)]
-    return near["rrmse_1_30"].idxmin(), summary
+def select(table: pd.DataFrame, primary: str | None = None, secondary: str | None = None) -> tuple[str, pd.DataFrame]:
+    """Best config: lowest mean primary; within 1 % of it, lowest mean secondary."""
+    if primary is None or secondary is None:
+        grid = load_yaml("section_a")["tuning"]
+        primary, secondary = primary or grid["primary"], secondary or grid["secondary"]
+    columns = [c for c in ("rrmse_1_9", "trf_relmse", "rrmse_1_30", "fraction_modified") if c in table]
+    summary = table.groupby("config")[columns].mean().sort_values(primary)
+    best_primary = summary[primary].min()
+    near = summary[summary[primary] <= best_primary * (1 + TOLERANCE)]
+    return near[secondary].idxmin(), summary
 
 
 def stage_configs(stage: int, best: Config) -> list[Config]:
