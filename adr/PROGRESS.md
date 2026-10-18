@@ -450,6 +450,39 @@ Milestones follow PROJECT_PLAN.md §17.
     `configs/frozen/section_a_tuned_on_set_a.yaml`; not to change from here
     on. Set B evaluation (`scripts/15_evaluate_section_a.py set_b`)
     started. References: `scripts/14b_tuning_references.py`.
+  - **Set B evaluation finished 2026-10-18 05:34** (`results/section_a/
+    test_set_b.csv`, 23,040 rows: 8 subjects x 6 SNR x 5 SAR x 4 types x 2
+    conditions x 8 pipelines; ~25 h with 4 workers). Means over recordings:
+
+    | pipeline | TRF relMSE | 1-9 Hz RRMSE | fraction modified | fwd r |
+    |---|---|---|---|---|
+    | artifact-free | 0.217 | 0 | 0 | 0.275 |
+    | oracle single MWF | 0.226 | 0.171 | 0.200 | 0.269 |
+    | **proposed** | **0.230** | **0.306** | 0.306 | 0.261 |
+    | no correction | 0.246 | 0.494 | 0 | 0.243 |
+    | ICA + ICLabel p0.7 (0.5 / 0.9) | 0.254 (0.258 / 0.251) | 0.904 | 1 | 0.282 |
+    | RELAX-style auto-MWF | 0.300 | 0.419 | 1 | 0.283 |
+
+    Per subject (mean over the grid), proposed beats no correction, ICA +
+    ICLabel p0.7 and RELAX on TRF relMSE in 8/8 subjects (Wilcoxon p = 0.008
+    each, the minimum for n = 8) and loses to the oracle MWF in 8/8. Holm over
+    the 8 comparisons gives p = 0.0625 for all - with 8 subjects the exact test
+    cannot reach 0.05 after correction; the cross-fit (16 subjects) and the
+    mixed model (§13) are the planned inference. Gains are concentrated at SAR
+    -10/-5 dB (TRF 0.302 -> 0.237 at -10 dB); at SAR +5/+10 dB and for pops the
+    proposed pipeline adds 1-9 Hz error (pop 0.104 vs 0.042 uncorrected),
+    and only 49 % of individual recordings improve on TRF. ICA is best at SNR
+    -25 dB (0.501 vs 0.516). Forward-prediction r is *higher* than the
+    artifact-free reference for ICA and RELAX (0.28 vs 0.275): whole-recording
+    filtering removes background EEG, so fwd r rewards over-cleaning.
+  - **Detection on Set B (proposed, frozen thresholds):** window sensitivity
+    0.42, specificity 0.82, fraction modified 0.31 (true ~0.20). Correct-type
+    sensitivity is very low except muscle: ocular 0.087, motion 0.002, pop
+    0.010, muscle 0.516 - injected phantom ocular/motion artifacts are mostly
+    flagged as another class (or missed), so in Section A routing largely does
+    not follow the true type; the gains come from correcting flagged samples
+    only. To report; any change to the method now would need data not yet
+    seen.
   - Compute note for Set B: ICA (~40 s) dominates; full grid 1920
     recordings per set -> roughly 10 h with 4-5 workers.
 
