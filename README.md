@@ -151,10 +151,11 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
 
    Bad channels can be marked automatically instead, skipping that one
    window:
-   `e.mark_bad_channels('all', manual_bad_channels=False, auto_bad_channels_r=0.3)`.
+   `e.mark_bad_channels('all', manual_bad_channels=False, auto_bad_channels_r=0.2)`.
    This uses the same neighbor-correlation computation behind the GUI's
    "Neighbor corr" scalp maps to mark any channel correlating with its
-   neighbors below `0.3` as bad, with no GUI for that step. Leave the
+   neighbors below `0.2` as bad, with no GUI for that step (the notebook
+   uses `0.2`; a higher cutoff such as `0.3` marks more channels bad). Leave the
    argument out (or explicitly pass `manual_bad_channels=True`) to keep
    doing bad channels by hand.
 
@@ -180,11 +181,13 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    than aborting the whole subject.
 
    ICA component selection can be automated the same way:
-   `e.select_ica_artifacts('all', manual_ica=False, auto_ica_confidence=0.75)`.
+   `e.select_ica_artifacts('all', manual_ica=False, auto_ica_confidence=0.9, auto_ica_reject_labels=('eye blink', 'heart beat'))`.
    This runs [mne-icalabel](https://github.com/mne-tools/mne-icalabel)'s
    ICLabel classifier on every component and excludes any predicted as
-   eye blink / muscle artifact / heart beat / line noise / channel noise
-   with at least `0.75` confidence, with no GUI for that step. It also
+   eye blink or heart beat (as in Brodbeck et al. 2020) with at least
+   `0.9` confidence, with no GUI for that step. Leave out
+   `auto_ica_reject_labels` to also remove muscle, line noise and
+   channel noise components, and lower the confidence to remove more. It also
    writes, per subject, next to the other preprocessing files under
    `bids/derivatives/mne/sub-XX/eeg/`:
      - `sub-XX_task-cocktail_desc-iclabel_components.tsv` - one row per
@@ -204,6 +207,14 @@ https://github.com/christianbrodbeck/binaural-cocktail/tree/eelbrain-0.43
    The rest of the notebook is the actual analysis: envelope model
    checks, the dichotic ear-of-presentation comparison, the
    binaural-cue comparison, and TRF/peak-time plots.
+
+   **Code layout:** every function the notebook calls lives in
+   `analysis/experiment.py` (predictor names, model comparisons, TRF
+   and peak helpers); the notebook only holds settings, the calls and
+   their results. Its settings reach those helpers through
+   `configure_analysis()`, and `set_partitions(PARTITIONS)` picks the
+   number of cross-validation folds for every TRF fit. New helpers go
+   in `experiment.py` too.
 
    The envelope-model topomaps use two helpers from `experiment.py`,
    `topomap_with_colorbar()` and `topomap_by_subject_with_colorbar()`

@@ -68,7 +68,7 @@ What runs, top to bottom, the moment this file is imported
   ready-to-use pipeline object, `e`, that every analysis script imports.
   This is the only line that produces something other scripts use.
 """
-from eelbrain import Factor, NDVar, Var, gui, plot
+from eelbrain import Factor, NDVar, Var, gui, plot, resample, table
 from eelbrain.pipeline import *
 # Private import: this is the exception eelbrain itself raises when a saved
 # ICA file no longer matches the bad channels (or other raw settings) it was
@@ -78,6 +78,7 @@ from eelbrain.pipeline import *
 from eelbrain._experiment.derivative_cache.base import ProtectedArtifactError
 from matplotlib.ticker import PercentFormatter
 import mne
+import numpy
 from pathlib import Path
 import re
 
@@ -186,6 +187,12 @@ SIDE = ((
 ))
 
 
+# Boosting settings shared by the default pipeline below and by
+# set_partitions(). partitions=-4: 4-fold cross-validation on the
+# concatenated data, the same 4 folds Brodbeck et al. 2020 used.
+BOOSTING_SETTINGS = dict(basis=0.050, error='l1', partitions=-4, selective_stopping=1)
+
+
 class BinauralCocktail(Pipeline):
 
     # The preprocessing steps applied to the raw EEG, each one building on
@@ -271,9 +278,11 @@ class BinauralCocktail(Pipeline):
     # PARAMETERS); they now belong here instead. `basis` and `error`
     # match Boosting's own defaults - listed explicitly so they're easy
     # to find and change - while `partitions` and `selective_stopping`
-    # override the defaults.
+    # override the defaults. The notebook picks its own `partitions`
+    # through set_partitions() below, so the value here is only the
+    # default for anything that imports `e` without choosing one.
     estimators = {
-        'boosting': Boosting(basis=0.050, error='l1', partitions=-4, selective_stopping=1),
+        'boosting': Boosting(**BOOSTING_SETTINGS),
     }
 
     def _resolve_subjects(self, subjects, skip=()):
@@ -861,6 +870,31 @@ class BinauralCocktail(Pipeline):
 e = BinauralCocktail(DATA_ROOT)
 
 
+def set_partitions(partitions):
+    """Rebuild `e` with a different number of boosting partitions.
+
+    The boosting settings are a class attribute (`estimators`), read
+    when the pipeline is built, so changing `partitions` means building
+    a new pipeline object: a subclass of BinauralCocktail with only that
+    one setting changed, everything else identical. This module's `e`
+    (used by the analysis helpers further down) is replaced too, and the
+    new object is returned so the notebook can do
+    `e = set_partitions(PARTITIONS)`.
+
+    partitions
+        Number of cross-validation folds. Negative (e.g. -10) means the
+        data are concatenated first and then split into that many
+        contiguous folds, the same convention as the -4 default.
+        More folds: each fit trains on a larger share of the data, but
+        fitting takes proportionally longer.
+    """
+    global e
+    estimators = {'boosting': Boosting(**{**BOOSTING_SETTINGS, 'partitions': partitions})}
+    cls = type(BinauralCocktail.__name__, (BinauralCocktail,), {'estimators': estimators, '__module__': __name__})
+    e = cls(DATA_ROOT)
+    return e
+
+
 def _bids_value(s):
     """Turn an arbitrary string into a BIDS-legal entity value.
 
@@ -1042,3 +1076,202 @@ def topomap_by_subject_with_colorbar(y, data, label=None, pct=True, condition=No
     if save:
         p.save(_topomap_figure_path(label, 'AllSubjects', condition, predictor))
     return p
+
+
+# ---------------------------------------------------------------------
+# Analysis helpers for analysis/cortical_analysis.ipynb
+# ---------------------------------------------------------------------
+# The notebook keeps only settings, calls and results; the functions it
+# calls live here. Settings the helpers need (fit PARAMETERS, ROI,
+# metric, ...) stay in the notebook, where they are easy to see and
+# change, and are handed over once with configure_analysis(). Each
+# helper reads them at call time, so re-running configure_analysis()
+# after changing a setting is enough - no re-import needed.
+
+# Stimulus-role prefixes for predictor names: which event column
+# supplies the stimulus for a term. '' = attended speaker (`fg`, the
+# default stim_var), 'bg~' = ignored speaker, 'mix~' = the mixture.
+ATTEND, IGNORE, MIX = '', 'bg~', 'mix~'
+
+ANALYSIS = {
+    'parameters': None,             # keyword arguments for load_trfs()/load_model_test()
+    'roi': None,                    # sensors averaged over for ROI summaries
+    'metric': 'r',                  # model-fit metric: 'r' or 'ev'
+    'pmin': 0.05,                   # cluster-forming threshold for model tests
+    'topo_args': {},                # extra arguments for topomap_with_colorbar()
+    'taper': (-0.030, 0.030),       # display taper: 0 at taper[0], 1 at taper[1]
+    'end_taper': 0.050,             # display taper: fade-out at the end of the fit window
+    'plot_window': (-0.050, 0.550), # time range TRF plots show
+}
+
+
+def configure_analysis(**settings):
+    """Set the notebook's analysis settings (keys of ANALYSIS) for the
+    helpers below. Unknown keys raise, so a typo can't be silently
+    ignored."""
+    unknown = set(settings) - set(ANALYSIS)
+    if unknown:
+        raise KeyError(f"Unknown analysis settings: {sorted(unknown)}")
+    ANALYSIS.update(settings)
+
+
+def _setting(name, value=None):
+    "An explicitly passed value, else the configured setting."
+    if value is not None:
+        return value
+    if ANALYSIS[name] is None:
+        raise RuntimeError(f"Analysis setting {name!r} is not configured - call configure_analysis({name}=...) first")
+    return ANALYSIS[name]
+
+
+# Predictor names. Every predictor code has to start with `gammatone-`
+# to resolve (it is the only registered predictor key, see `predictors`
+# above).
+
+def envelope(role=ATTEND):
+    return f"{role}gammatone-8"
+
+
+def onset(role=ATTEND):
+    return f"{role}gammatone-on-8"
+
+
+def overt_onset(role=ATTEND):
+    return f"{role}gammatone-on-overt-8"
+
+
+def masked_onset(role=ATTEND):
+    return f"{role}gammatone-on-masked-8"
+
+
+def level_onset(tier, role=MIX):
+    assert tier in ('low', 'mid', 'high')
+    return f"{role}gammatone-on-{tier}-8"
+
+
+# Model comparisons
+
+def _model_test(comparison, epoch, roi, metric):
+    roi = _setting('roi', roi)
+    metric = _setting('metric', metric)
+    data, result = e.load_model_test(
+        comparison, **_setting('parameters'), pmin=ANALYSIS['pmin'], metric=metric, epoch=epoch, return_data=True)
+    diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
+    diff[f'roi_{metric}'] = diff[metric].mean(sensor=roi)
+    return data, diff, result
+
+
+def compute_unique_contribution(full_model, predictor, epoch, roi=None, metric=None):
+    "Omission comparison: does `predictor` uniquely improve on `full_model` with it removed?"
+    return _model_test(f"{full_model} @ {predictor}", epoch, roi, metric)
+
+
+def compute_direct_comparison(model_a, model_b, epoch, roi=None, metric=None):
+    "Direct, non-nested comparison: does model_a fit better than model_b?"
+    return _model_test(f"{model_a} > {model_b}", epoch, roi, metric)
+
+
+def show_topomap_trio(data, diff, result, label, epoch, predictor, metric=None):
+    "Group-averaged topomaps: the test model's own fit, the baseline model's own fit, and their significance-masked difference"
+    metric = _setting('metric', metric)
+    pmin = ANALYSIS['pmin']
+    pct = metric == 'ev'
+    topo_kwargs = dict(pct=pct, condition=epoch, predictor=predictor, colorbar_side='left', colorbar_label=False, **ANALYSIS['topo_args'])
+    topomap_with_colorbar(metric, data.sub("model == 'test'"), label=f'{label}: test', **topo_kwargs)
+    topomap_with_colorbar(metric, data.sub("model == 'baseline'"), label=f'{label}: baseline', **topo_kwargs)
+    # The third panel shows the mean r/ev difference (the actual unique
+    # contribution), masked by significance - NOT result's own
+    # masked_parameter_map() directly, which holds the test's underlying
+    # t-values, not the r/ev difference reported everywhere else. So:
+    # take the real mean difference, and only borrow the *mask* - which
+    # sensors were significant - from the test result.
+    mean_diff = diff[metric].mean('case')
+    significant = numpy.ma.getmaskarray(result.masked_parameter_map(pmin=pmin).x)
+    masked_diff = NDVar(numpy.ma.MaskedArray(mean_diff.x, mask=significant), mean_diff.dims, mean_diff.name, mean_diff.info)
+    topomap_with_colorbar(None, masked_diff, label=f'{label}: test - baseline', **topo_kwargs)
+
+
+def show_subject_swarm(diff, label, epoch, metric=None):
+    "One dot per subject: their own ROI-averaged test-minus-baseline score (Brodbeck Fig 3B/4B style)"
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    metric = _setting('metric', metric)
+    fig, ax = plt.subplots(figsize=(2, 2.5))
+    sns.swarmplot(y=diff[f'roi_{metric}'].x, ax=ax, size=5, color='.25')
+    ax.axhline(0, color='k', lw=0.8, ls='--')
+    ax.set_ylabel(metric)
+    ax.set_xticks([])
+    ax.set_title(f'{label} ({epoch})', fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
+# Reading TRFs out of an already-loaded load_trfs() result, and peaks
+
+def taper_prestim(trf, crop=True):
+    """For display only: fade the TRF in across 0 ms and out at the end of
+    the fit window, then crop to the configured plot window.
+
+    The envelope TRF's first lags absorb activity from just outside the
+    -100 ms fit edge, which shows up as spurious activity before 0 ms. A
+    half-Hann ramp (0 at taper[0], 1 at taper[1]) suppresses it, and the
+    matching fade-out removes the dip at the other edge. The fitted model
+    is untouched, and peaks measured from 40 ms on are unaffected.
+    """
+    times = trf.time.times
+    ramp = numpy.ones(len(times))
+    start, stop = ANALYSIS['taper']
+    ramp[times <= start] = 0
+    rise = (times > start) & (times < stop)
+    ramp[rise] = 0.5 * (1 - numpy.cos(numpy.pi * (times[rise] - start) / (stop - start)))
+    end_taper = ANALYSIS['end_taper']
+    fall_start = times[-1] - end_taper
+    fall = times > fall_start
+    ramp[fall] *= 0.5 * (1 + numpy.cos(numpy.pi * (times[fall] - fall_start) / end_taper))
+    out = trf * NDVar(ramp, (trf.time,))
+    return out.sub(time=ANALYSIS['plot_window']) if crop else out
+
+
+def extract_strf(data_full, column, roi=None):
+    "Group-average (frequency, time) STRF for one predictor column, read from an already-loaded load_trfs() result"
+    roi = _setting('roi', roi)
+    return taper_prestim(data_full[column].mean(sensor=roi).mean('case'))
+
+
+def extract_trf(data_full, column, roi=None):
+    "Per-subject, ROI-averaged, frequency-summed, smoothed TRF for one predictor column, read from an already-loaded load_trfs() result"
+    roi = _setting('roi', roi)
+    trf = taper_prestim(data_full[column].sum('frequency').mean(sensor=roi), crop=False)
+    ds = data_full['subject',]
+    # Crop only after smoothing, so resample() never sees a cut edge
+    ds['trf_sm'] = resample(trf, 512).sub(time=ANALYSIS['plot_window'])
+    return ds
+
+
+def extract_attention_effect(data, attend_column, ignore_column, roi=None):
+    "Per-subject attend - ignore TRF difference, ROI-averaged and frequency-summed, with the same display taper as the other TRF plots"
+    roi = _setting('roi', roi)
+    attend_trf = data[attend_column].sum('frequency').mean(sensor=roi)
+    ignore_trf = data[ignore_column].sum('frequency').mean(sensor=roi)
+    return taper_prestim(attend_trf - ignore_trf)
+
+
+def add_peak(ds, name, window, kind='max'):
+    "Add `{name}_time`/`{name}_amp`: the location/value of ds['trf_sm']'s peak within `window`"
+    segment = ds['trf_sm'].sub(time=window)
+    if kind == 'max':
+        ds[f'{name}_time'] = segment.argmax('time')
+        ds[f'{name}_amp'] = segment.max('time')
+    else:
+        ds[f'{name}_time'] = segment.argmin('time')
+        ds[f'{name}_amp'] = segment.min('time')
+    return ds
+
+
+def print_peak_table(data, kind, group):
+    "Per-subject table of one peak's time (ms) and amplitude, broken down by `group` (e.g. 'role'/'masking')"
+    print(f"\n{kind} peak")
+    print(f"{'subject':<10}{group:<10}{'time (ms)':>12}{'amp':>14}")
+    for subject, g, t, amp in zip(data['subject'], data[group], data[f'{kind}_time'], data[f'{kind}_amp']):
+        print(f"{subject:<10}{g:<10}{t * 1e3:>12.0f}{amp:>14.4g}")
