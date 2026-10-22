@@ -1099,7 +1099,8 @@ ANALYSIS = {
     'metric': 'r',                  # model-fit metric: 'r' or 'ev'
     'pmin': 0.05,                   # cluster-forming threshold for model tests
     'topo_args': {},                # extra arguments for topomap_with_colorbar()
-    'taper': (-0.030, 0.030),       # display taper: 0 at taper[0], 1 at taper[1]
+    'taper': (0.003, 0.033),        # display taper: floor up to taper[0], full strength from taper[1]
+    'taper_floor': 0.1,             # display taper: share of the TRF kept before taper[0]
     'end_taper': 0.050,             # display taper: fade-out at the end of the fit window
     'plot_window': (-0.050, 0.550), # time range TRF plots show
 }
@@ -1213,18 +1214,20 @@ def taper_prestim(trf, crop=True):
     """For display only: fade the TRF in across 0 ms and out at the end of
     the fit window, then crop to the configured plot window.
 
-    The envelope TRF's first lags absorb activity from just outside the
-    -100 ms fit edge, which shows up as spurious activity before 0 ms. A
-    half-Hann ramp (0 at taper[0], 1 at taper[1]) suppresses it, and the
-    matching fade-out removes the dip at the other edge. The fitted model
+    The TRF's first lags absorb activity from just outside the -100 ms
+    fit edge, and the 50 ms basis smears responses back towards 0 ms. Up
+    to taper[0] the TRF is scaled down to `taper_floor` (keeping its own
+    small fluctuations), then a half-Hann ramp brings it to full strength
+    at taper[1]; the matching fade-out removes the dip at the other edge. The fitted model
     is untouched, and peaks measured from 40 ms on are unaffected.
     """
     times = trf.time.times
     ramp = numpy.ones(len(times))
     start, stop = ANALYSIS['taper']
-    ramp[times <= start] = 0
+    floor = ANALYSIS['taper_floor']
+    ramp[times <= start] = floor
     rise = (times > start) & (times < stop)
-    ramp[rise] = 0.5 * (1 - numpy.cos(numpy.pi * (times[rise] - start) / (stop - start)))
+    ramp[rise] = floor + (1 - floor) * 0.5 * (1 - numpy.cos(numpy.pi * (times[rise] - start) / (stop - start)))
     end_taper = ANALYSIS['end_taper']
     fall_start = times[-1] - end_taper
     fall = times > fall_start
