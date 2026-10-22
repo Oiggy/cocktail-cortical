@@ -249,6 +249,14 @@ format (plain `.py`, paired with a local, not-committed `.ipynb`), so
 they can be opened directly as notebooks, or run top to bottom as
 plain scripts.
 
+## `cluster/` - running the analysis on an Alliance cluster
+
+The TRF fits are too heavy for a laptop. `cluster/run_notebook.sbatch`
+runs `analysis/cortical_analysis.ipynb` on a Digital Research Alliance
+of Canada cluster, filling the eelbrain cache; copy the cache back and
+the notebook on the laptop loads the finished fits. Step-by-step setup
+and use: `cluster/README.md`.
+
 ## `diagnostics/` - one-off diagnostic scripts
 
 Not part of the pipeline; kept for reference when something needs

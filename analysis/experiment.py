@@ -68,7 +68,7 @@ What runs, top to bottom, the moment this file is imported
   ready-to-use pipeline object, `e`, that every analysis script imports.
   This is the only line that produces something other scripts use.
 """
-from eelbrain import Factor, NDVar, Var, gui, plot, resample, table
+from eelbrain import Factor, NDVar, Var, configure, gui, plot, resample, table
 from eelbrain.pipeline import *
 # Private import: this is the exception eelbrain itself raises when a saved
 # ICA file no longer matches the bad channels (or other raw settings) it was
@@ -79,8 +79,27 @@ from eelbrain._experiment.derivative_cache.base import ProtectedArtifactError
 from matplotlib.ticker import PercentFormatter
 import mne
 import numpy
+import os
 from pathlib import Path
 import re
+
+# On a computing cluster (SLURM), eelbrain would otherwise start one
+# worker per core of the whole node, not just the cores this job was
+# given - so match it to the job's allocation instead.
+if 'SLURM_CPUS_PER_TASK' in os.environ:
+    configure(n_workers=int(os.environ['SLURM_CPUS_PER_TASK']))
+
+
+def _ask(prompt):
+    """input(), unless COCKTAIL_ANSWER is set (unattended runs, e.g.
+    cluster/run_notebook.sbatch): then that answer is used without
+    waiting for anyone, and printed so the log shows what was chosen."""
+    answer = os.environ.get('COCKTAIL_ANSWER')
+    if answer is None:
+        return input(prompt)
+    print(f"{prompt}{answer}  (COCKTAIL_ANSWER)")
+    return answer
+
 
 # The dataset lives outside this repo, in a sibling "dataset/cocktail"
 # folder next to it. Working this out from this file's own location
@@ -389,7 +408,7 @@ class BinauralCocktail(Pipeline):
 
         if subjects_arg == 'all':
             names = ', '.join(askable)
-            answer = input(
+            answer = _ask(
                 f"  {description} already exists for: {names}. "
                 f"Skip all of them (default) or redo and overwrite all of them? [s/r]: "
             ).strip().lower()
@@ -399,7 +418,7 @@ class BinauralCocktail(Pipeline):
             return [s for s in resolved_subjects if s not in askable]
         else:
             subject, existing_path = next(iter(askable.items()))
-            answer = input(
+            answer = _ask(
                 f"  {subject}: {description} already exists ({existing_path.name}). "
                 f"Skip (default) or redo and overwrite? [s/r]: "
             ).strip().lower()
