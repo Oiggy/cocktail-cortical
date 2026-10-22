@@ -21,6 +21,7 @@ channels:
   - conda-forge/label/eelbrain_dev
 dependencies:
   - eelbrain>=0.42.0a4
+  - python>=3.12,<3.14
   - pip
   # eelbrain's interactive GUI (make_bad_channels_selection(),
   # make_ica_selection()) needs IPython.core.pylabtools.backend2gui,

@@ -19,10 +19,13 @@ if [ ! -x bin/micromamba ]; then
     curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj bin/micromamba
 fi
 
-bin/micromamba create -y -n cocktail-cortical -f "$REPO/environment.yml"
 if [ -n "$EELBRAIN_VERSION" ]; then
-    bin/micromamba install -y -n cocktail-cortical \
-        -c conda-forge -c conda-forge/label/eelbrain_dev "eelbrain=$EELBRAIN_VERSION"
+    EELBRAIN_SPEC="eelbrain=$EELBRAIN_VERSION"
+else
+    EELBRAIN_SPEC="eelbrain>=0.42.0a4"
 fi
+
+bin/micromamba create -y -n cocktail-cortical -f "$REPO/environment.yml" \
+    -c conda-forge -c conda-forge/label/eelbrain_dev "$EELBRAIN_SPEC"
 
 bin/micromamba run -n cocktail-cortical python -c "import eelbrain; print('eelbrain', eelbrain.__version__)"
