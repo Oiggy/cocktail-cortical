@@ -5,11 +5,11 @@
 # the notebook there loads the fits instead of computing them.
 #
 # Submit from the repo root:
-#   sbatch --account=def-SUPERVISOR cluster/run_notebook.sbatch
+#   sbatch --account=def-ibruce cluster/run_notebook.sbatch
 #
 # Preprocessing prompts ("redo or skip subjects already done?") are
 # answered with COCKTAIL_ANSWER: 's' (skip, default) or 'r' (redo), e.g.
-#   sbatch --account=def-SUPERVISOR --export=ALL,COCKTAIL_ANSWER=r cluster/run_notebook.sbatch
+#   sbatch --account=def-ibruce --export=ALL,COCKTAIL_ANSWER=r cluster/run_notebook.sbatch
 #
 #SBATCH --job-name=cocktail-trfs
 #SBATCH --cpus-per-task=32

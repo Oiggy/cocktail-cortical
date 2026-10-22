@@ -10,25 +10,22 @@ Any of the general-purpose clusters works: **Fir, Nibi, Rorqual or
 Narval**. Below, replace:
 
 - `CLUSTER` with the cluster's address, e.g. `nibi.alliancecan.ca`
-- `USER` with your Alliance username
-- `SUPERVISOR` with your supervisor's allocation name (the part after
-  `def-`, shown in CCDB under "My Account")
 - `MAC_WORK` with the folder on your Mac that contains both
   `cocktail-cortical/` and `dataset/`
 
 The cluster uses the same layout as the Mac: the repo and `dataset/`
 side by side, in your project space:
-`~/projects/def-SUPERVISOR/USER/`.
+`~/projects/def-ibruce/iggy/`.
 
 ## One-time setup
 
 1. **Log in** (multi-factor authentication must be on in CCDB):
    ```
-   ssh USER@CLUSTER
+   ssh iggy@CLUSTER
    ```
 2. **Get the code** into your project space:
    ```
-   cd ~/projects/def-SUPERVISOR/USER
+   cd ~/projects/def-ibruce/iggy
    git clone https://github.com/Oiggy/cocktail-cortical.git
    ```
    If the repo is private, GitHub asks for a password: use a personal
@@ -38,7 +35,7 @@ side by side, in your project space:
 3. **Upload the dataset** from the Mac (in a Mac terminal). Check first
    that your ethics approval allows storing the data on Alliance servers.
    ```
-   rsync -avP MAC_WORK/dataset/ USER@CLUSTER:projects/def-SUPERVISOR/USER/dataset/
+   rsync -avP MAC_WORK/dataset/ iggy@CLUSTER:projects/def-ibruce/iggy/dataset/
    ```
    For a very large upload, Globus (globus.alliancecan.ca) is faster
    and resumes by itself.
@@ -51,7 +48,7 @@ side by side, in your project space:
 5. **Build the environment on the cluster** (on the login node, takes
    10 to 20 minutes), passing that version:
    ```
-   cd ~/projects/def-SUPERVISOR/USER/cocktail-cortical
+   cd ~/projects/def-ibruce/iggy/cocktail-cortical
    bash cluster/setup_env.sh 0.42.0a7
    ```
    This installs micromamba and the `cocktail-cortical` environment
@@ -63,29 +60,29 @@ side by side, in your project space:
 
 1. **Update the code** on the cluster if it changed:
    ```
-   cd ~/projects/def-SUPERVISOR/USER/cocktail-cortical
+   cd ~/projects/def-ibruce/iggy/cocktail-cortical
    git pull
    ```
 2. **Submit the job:**
    ```
-   sbatch --account=def-SUPERVISOR cluster/run_notebook.sbatch
+   sbatch --account=def-ibruce cluster/run_notebook.sbatch
    ```
    The preprocessing cells ask whether to redo subjects that were
    already done. The job answers "skip" by default. To redo them (for
    example after changing the bad-channel or ICA settings), submit with:
    ```
-   sbatch --account=def-SUPERVISOR --export=ALL,COCKTAIL_ANSWER=r cluster/run_notebook.sbatch
+   sbatch --account=def-ibruce --export=ALL,COCKTAIL_ANSWER=r cluster/run_notebook.sbatch
    ```
 3. **Watch it:**
    ```
-   squeue -u USER                                  # queued / running
+   squeue -u iggy                                  # queued / running
    tail -f cluster/runs/cocktail-trfs-JOBID.out    # live log
    ```
    You also get an email when it ends or fails. The executed notebook,
    with all outputs, is saved as `cluster/runs/cortical_analysis_JOBID.ipynb`.
 4. **Copy the results back** (in a Mac terminal):
    ```
-   rsync -avP USER@CLUSTER:projects/def-SUPERVISOR/USER/dataset/cocktail/bids/derivatives/ MAC_WORK/dataset/cocktail/bids/derivatives/
+   rsync -avP iggy@CLUSTER:projects/def-ibruce/iggy/dataset/cocktail/bids/derivatives/ MAC_WORK/dataset/cocktail/bids/derivatives/
    ```
 5. **On the Mac**, `git pull`, open the notebook in VS Code and run it
    as usual. The fits now load from the cache. Check once that the
