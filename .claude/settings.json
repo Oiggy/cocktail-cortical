@@ -1,0 +1,13 @@
+{
+  "env": {
+    "GIT_AUTHOR_NAME": "Joshua Ighalo",
+    "GIT_AUTHOR_EMAIL": "josh.workspacedev@gmail.com",
+    "GIT_COMMITTER_NAME": "Joshua Ighalo",
+    "GIT_COMMITTER_EMAIL": "josh.workspacedev@gmail.com"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "includeCoAuthoredBy": false
+}
