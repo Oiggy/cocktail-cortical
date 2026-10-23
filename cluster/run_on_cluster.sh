@@ -73,7 +73,14 @@ fi
 # --- Step 2: Pull latest code on cluster ---
 echo ""
 echo "==> Pulling latest code on cluster..."
-remote "cd ~/${REMOTE_REPO} && git pull"
+remote "cd ~/${REMOTE_REPO} && git pull --no-rebase --no-edit"
+
+# rsync on macOS drops sub-second mtimes, which makes eelbrain treat every
+# cached file on the cluster as stale; copy the exact times across.
+echo ""
+echo "==> Syncing exact file times to the cluster copy..."
+python3 "$REPO/cluster/sync_mtimes.py" dump "$MAC_DATASET" \
+    | remote "python3 ~/${REMOTE_REPO}/cluster/sync_mtimes.py apply ~/${REMOTE_DATASET}"
 
 # --- Step 3: Submit the job ---
 echo ""
@@ -135,6 +142,8 @@ if [ "$SKIP_DOWNLOAD" != "1" ]; then
     rsync -avP -e "ssh $SSH_OPTS" \
         "${CLUSTER_USER}@${CLUSTER}:${REMOTE_DATASET}/cocktail/bids/derivatives/" \
         "$MAC_DATASET/cocktail/bids/derivatives/"
+    remote "python3 ~/${REMOTE_REPO}/cluster/sync_mtimes.py dump ~/${REMOTE_DATASET}/cocktail/bids/derivatives" \
+        | python3 "$REPO/cluster/sync_mtimes.py" apply "$MAC_DATASET/cocktail/bids/derivatives"
     echo "    Download complete."
 else
     echo ""

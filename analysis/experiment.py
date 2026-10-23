@@ -740,21 +740,7 @@ class BinauralCocktail(Pipeline):
         from mne_icalabel import label_components
         import matplotlib.pyplot as plt
 
-        try:
-            path = self.make_ica(raw='ica')
-        except ProtectedArtifactError:
-            # ICA file is stale (e.g. file mtimes lost sub-second precision
-            # after rsync to a cluster filesystem). make_ica() would prompt
-            # interactively, which crashes under headless nbconvert. Since
-            # _filter_already_done() already decided this subject needs
-            # re-processing, remove the stale file and let make_ica()
-            # compute a fresh one.
-            subj = self.get('subject')
-            stale_dir = self._subject_deriv_dir(subj)
-            for stale in stale_dir.glob('*_ica.fif'):
-                print(f"  Removing stale ICA file: {stale.name}")
-                stale.unlink()
-            path = self.make_ica(raw='ica')
+        path = self.make_ica(raw='ica')
         ica = mne.preprocessing.read_ica(path, verbose=False)
 
         # mne-icalabel's ICLabel classifier expects data filtered 1-100 Hz
