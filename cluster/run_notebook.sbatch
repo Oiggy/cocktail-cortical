@@ -21,6 +21,7 @@ set -euo pipefail
 
 REPO="$SLURM_SUBMIT_DIR"
 WORK="$(dirname "$REPO")"
+export XDG_CACHE_HOME="$WORK/.cache"
 export MAMBA_ROOT_PREFIX="$WORK/micromamba"
 eval "$("$WORK/bin/micromamba" shell hook -s bash)"
 micromamba activate cocktail-cortical
