@@ -1291,7 +1291,10 @@ def taper_prestim(trf, crop=True):
 def extract_strf(data_full, column, roi=None):
     "Group-average (frequency, time) STRF for one predictor column, read from an already-loaded load_trfs() result"
     roi = _setting('roi', roi)
-    return taper_prestim(data_full[column].mean(sensor=roi).mean('case'))
+    strf = taper_prestim(data_full[column].mean(sensor=roi).mean('case'), crop=False)
+    # One extra sample each side, so the image covers the whole PLOT_WINDOW (the plot's xlim crops it)
+    start, stop = ANALYSIS['plot_window']
+    return strf.sub(time=(start - strf.time.tstep, stop + strf.time.tstep))
 
 
 def extract_trf(data_full, column, roi=None):
