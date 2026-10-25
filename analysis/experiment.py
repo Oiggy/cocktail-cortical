@@ -1305,11 +1305,12 @@ def extract_trf(data_full, column, roi=None):
 
 
 def extract_attention_effect(data, attend_column, ignore_column, roi=None):
-    "Per-subject attend - ignore TRF difference, ROI-averaged and frequency-summed, with the same display taper as the other TRF plots"
+    "Per-subject attend - ignore TRF difference, ROI-averaged and frequency-summed, tapered and smoothed like extract_trf()'s 'trf_sm'"
     roi = _setting('roi', roi)
     attend_trf = data[attend_column].sum('frequency').mean(sensor=roi)
     ignore_trf = data[ignore_column].sum('frequency').mean(sensor=roi)
-    return taper_prestim(attend_trf - ignore_trf)
+    difference = taper_prestim(attend_trf - ignore_trf, crop=False)
+    return resample(difference, 512).sub(time=ANALYSIS['plot_window'])
 
 
 def add_peak(ds, name, window, kind='max'):
