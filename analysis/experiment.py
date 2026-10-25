@@ -1344,8 +1344,9 @@ def add_peak_2(ds, name, window, kind='max', halfwidth=0.025, by=None, suffix='_
     by=None pools every case in `ds` into one anchor, so conditions share a
     search range: no condition can pull its own range towards its own peak,
     but a condition peaking more than `halfwidth` from the shared anchor is cut
-    off. Pass a factor name (e.g. by='role') to give each level its own anchor
-    when latencies differ a lot between levels.
+    off. Pass a factor name (e.g. by='role'), or several (by=('role', 'epoch')),
+    to give each level (or combination of levels) its own anchor, taken from
+    that condition's own average waveform.
     """
     import warnings
     trf = ds['trf_sm']
@@ -1359,7 +1360,9 @@ def add_peak_2(ds, name, window, kind='max', halfwidth=0.025, by=None, suffix='_
     if by is None:
         groups = [('all', numpy.ones(len(x), bool))]
     else:
-        groups = [(str(cell), numpy.asarray(ds[by] == cell)) for cell in ds[by].cells]
+        factors = [by] if isinstance(by, str) else list(by)
+        labels = numpy.array(['/'.join(str(ds[f][i]) for f in factors) for i in range(len(x))])
+        groups = [(str(label), labels == label) for label in dict.fromkeys(labels)]
     anchors = numpy.empty(len(x))
     anchor_info = {}
     for label, index in groups:
@@ -1381,44 +1384,9 @@ def add_peak_2(ds, name, window, kind='max', halfwidth=0.025, by=None, suffix='_
     return ds
 
 
-def compare_peak_methods(data, names=('positive', 'negative'), group=None, suffix='_2'):
-    """Side by side: add_peak_1() columns (no suffix) vs add_peak_2() columns (`suffix`) already in `data`.
-
-    Prints each method's mean/SD of peak time and mean amplitude, how many
-    subjects' method-2 peaks sit on the edge of their search range, and a
-    paired t-test between the methods. With `group` (e.g. 'role'), also runs
-    the usual pairwise tests on peak time and amplitude, once per method.
-    """
-    from IPython.display import display
-    from eelbrain import test
-    from scipy import stats
-    methods = (('1', ''), ('2', suffix))
-    print(f"{'peak':<10}{'method':<8}{'time (ms)':>11}{'SD':>7}{'amp':>12}{'edge':>6}")
-    for name in names:
-        values = {}
-        for method, sfx in methods:
-            t = data[f'{name}_time{sfx}'].x * 1e3
-            a = data[f'{name}_amp{sfx}'].x
-            edge = int(data[f'{name}_edge{sfx}'].x.sum()) if sfx else '-'
-            values[method] = (t, a)
-            print(f"{name:<10}{method:<8}{t.mean():>11.1f}{t.std(ddof=1):>7.1f}{a.mean():>12.4g}{edge:>6}")
-        (t1, a1), (t2, a2) = values['1'], values['2']
-        if numpy.allclose(t1, t2) and numpy.allclose(a1, a2):
-            print(f"{'':<10}method 1 vs 2: identical for every subject")
-            continue
-        rt, ra = stats.ttest_rel(t1, t2), stats.ttest_rel(a1, a2)
-        print(f"{'':<10}method 1 vs 2 (paired): time t={rt.statistic:.2f} p={rt.pvalue:.3f}; amp t={ra.statistic:.2f} p={ra.pvalue:.3f}")
-    if group:
-        for name in names:
-            for measure in ('time', 'amp'):
-                for method, sfx in methods:
-                    display(test.pairwise(f'{name}_{measure}{sfx}', group, match='subject', data=data, corr=False,
-                                          title=f'{name} peak {measure} by {group}, method {method}'))
-
-
-def print_peak_table(data, kind, group):
-    "Per-subject table of one peak's time (ms) and amplitude, broken down by `group` (e.g. 'role'/'masking')"
+def print_peak_table(data, kind, group, suffix=''):
+    "Per-subject table of one peak's time (ms) and amplitude, broken down by `group` (e.g. 'role'/'masking'); suffix='_2' reads the add_peak_2 columns"
     print(f"\n{kind} peak")
     print(f"{'subject':<10}{group:<10}{'time (ms)':>12}{'amp':>14}")
-    for subject, g, t, amp in zip(data['subject'], data[group], data[f'{kind}_time'], data[f'{kind}_amp']):
+    for subject, g, t, amp in zip(data['subject'], data[group], data[f'{kind}_time{suffix}'], data[f'{kind}_amp{suffix}']):
         print(f"{subject:<10}{g:<10}{t * 1e3:>12.0f}{amp:>14.4g}")
