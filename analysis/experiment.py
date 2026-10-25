@@ -349,6 +349,39 @@ class BinauralCocktail(Pipeline):
             return True
         return False
 
+    def _make_ica_unattended_safe(self):
+        """make_ica(raw='ica'), without eelbrain's stale-ICA prompt in unattended runs.
+
+        Copying the dataset to a cluster rounds file times to whole seconds,
+        which eelbrain reports as a changed input and answers with an
+        interactive prompt (a crash without a terminal). When COCKTAIL_ANSWER
+        is set and every recorded change is such a rounded file time, this
+        gives eelbrain's own 'incorporate' answer: keep the ICA, update its
+        manifest. Any other change raises with eelbrain's reason.
+        """
+        if os.environ.get('COCKTAIL_ANSWER') is None:
+            return self.make_ica(raw='ica')
+        try:
+            self.load_ica(raw='ica')
+            return self.make_ica(raw='ica')
+        except ProtectedArtifactError as error:
+            reason = str(error)
+        changes = re.findall(r'([^\s(,]+): (\S+?) -> (\S+?)[,)]', reason)
+        only_rounded_mtimes = (
+            changes and len(changes) == reason.count(' -> ')
+            and all(key.endswith('mtime') and int(float(old)) == int(float(new)) for key, old, new in changes)
+        )
+        if not only_rounded_mtimes:
+            raise RuntimeError(f"Stale ICA for subject {self.get('subject')} needs a decision by hand:\n{reason}")
+        from eelbrain._experiment import pipeline as eelbrain_pipeline
+        original_ask = eelbrain_pipeline.ask
+        eelbrain_pipeline.ask = lambda *args, **kwargs: 'incorporate'
+        try:
+            print("  ICA only differs in rounded file times - keeping it (incorporate).")
+            return self.make_ica(raw='ica')
+        finally:
+            eelbrain_pipeline.ask = original_ask
+
     def _filter_already_done(self, subjects_arg, resolved_subjects, glob_pattern, description, is_stale=None):
         """Drop subjects that already have saved output, after asking.
 
@@ -740,7 +773,7 @@ class BinauralCocktail(Pipeline):
         from mne_icalabel import label_components
         import matplotlib.pyplot as plt
 
-        path = self.make_ica(raw='ica')
+        path = self._make_ica_unattended_safe()
         ica = mne.preprocessing.read_ica(path, verbose=False)
 
         # mne-icalabel's ICLabel classifier expects data filtered 1-100 Hz

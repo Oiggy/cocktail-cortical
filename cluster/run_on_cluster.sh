@@ -142,8 +142,10 @@ if [ "$SKIP_DOWNLOAD" != "1" ]; then
     rsync -avP -e "ssh $SSH_OPTS" \
         "${CLUSTER_USER}@${CLUSTER}:${REMOTE_DATASET}/cocktail/bids/derivatives/" \
         "$MAC_DATASET/cocktail/bids/derivatives/"
-    remote "python3 ~/${REMOTE_REPO}/cluster/sync_mtimes.py dump ~/${REMOTE_DATASET}/cocktail/bids/derivatives" \
-        | python3 "$REPO/cluster/sync_mtimes.py" apply "$MAC_DATASET/cocktail/bids/derivatives"
+    # Match the Mac copy's file times to the cluster's (which may be whole
+    # seconds), so the downloaded cache fingerprints match the Mac's inputs.
+    remote "python3 ~/${REMOTE_REPO}/cluster/sync_mtimes.py dump ~/${REMOTE_DATASET}" \
+        | python3 "$REPO/cluster/sync_mtimes.py" apply "$MAC_DATASET"
     echo "    Download complete."
 else
     echo ""

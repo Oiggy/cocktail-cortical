@@ -28,7 +28,7 @@ def dump(root):
 
 def apply(root):
     root = Path(root)
-    n_set = n_same = n_skip = 0
+    n_set = n_same = n_skip = n_rounded = 0
     for line in sys.stdin:
         mtime_ns, size, rel = line.rstrip('\n').split('\t', 2)
         mtime_ns, size = int(mtime_ns), int(size)
@@ -42,10 +42,15 @@ def apply(root):
             n_same += 1
         elif st.st_size == size and st.st_mtime_ns // 10**9 == mtime_ns // 10**9:
             os.utime(path, ns=(st.st_atime_ns, mtime_ns), follow_symlinks=False)
-            n_set += 1
+            if path.lstat().st_mtime_ns == mtime_ns:
+                n_set += 1
+            else:
+                n_rounded += 1
         else:
             n_skip += 1
     print(f"mtimes restored: {n_set}, already exact: {n_same}, skipped (missing or changed): {n_skip}", file=sys.stderr)
+    if n_rounded:
+        print(f"not kept by this filesystem (whole seconds only): {n_rounded}", file=sys.stderr)
 
 
 if __name__ == '__main__':
