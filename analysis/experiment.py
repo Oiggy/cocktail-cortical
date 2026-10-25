@@ -1324,6 +1324,98 @@ def add_peak(ds, name, window, kind='max'):
     return ds
 
 
+add_peak_1 = add_peak
+
+
+def add_peak_2(ds, name, window, kind='max', halfwidth=0.025, by=None, suffix='_2'):
+    """Like add_peak(), but each subject's peak is searched only near the group-average peak.
+
+    The group-average of ds['trf_sm'] is searched for its largest (kind='max')
+    or smallest (kind='min') value inside `window`: the anchor. Each subject's
+    peak is then the largest/smallest value within `halfwidth` seconds of the
+    anchor (and inside `window`), so a subject's peak cannot jump to an
+    unrelated bump far from where the average waveform peaks.
+
+    Adds `{name}_time{suffix}`, `{name}_amp{suffix}` and `{name}_edge{suffix}`
+    (1 where the subject's peak sits on the edge of its search range, i.e. the
+    waveform had no local peak there) and stores the anchor time in seconds in
+    ds.info['{name}_anchor{suffix}'] (one entry per level of `by`).
+
+    by=None pools every case in `ds` into one anchor, so conditions share a
+    search range: no condition can pull its own range towards its own peak,
+    but a condition peaking more than `halfwidth` from the shared anchor is cut
+    off. Pass a factor name (e.g. by='role') to give each level its own anchor
+    when latencies differ a lot between levels.
+    """
+    import warnings
+    trf = ds['trf_sm']
+    x = trf.get_data(('case', 'time'))
+    times = trf.time.times
+    sign = 1 if kind == 'max' else -1
+    in_window = (times >= window[0]) & (times <= window[1])
+    if not in_window.any():
+        raise ValueError(f"window {window} contains no time points of the TRF")
+    first_in, last_in = in_window.argmax(), len(times) - 1 - in_window[::-1].argmax()
+    if by is None:
+        groups = [('all', numpy.ones(len(x), bool))]
+    else:
+        groups = [(str(cell), numpy.asarray(ds[by] == cell)) for cell in ds[by].cells]
+    anchors = numpy.empty(len(x))
+    anchor_info = {}
+    for label, index in groups:
+        grand = numpy.where(in_window, sign * x[index].mean(axis=0), -numpy.inf)
+        i = grand.argmax()
+        anchors[index] = times[i]
+        anchor_info[label] = float(times[i])
+        if i in (first_in, last_in):
+            warnings.warn(f"{name} anchor ({label}) at {times[i] * 1e3:.0f} ms is on the edge of the search window {window}")
+    allowed = in_window[None, :] & (numpy.abs(times[None, :] - anchors[:, None]) <= halfwidth)
+    idx = numpy.where(allowed, sign * x, -numpy.inf).argmax(axis=1)
+    rows = numpy.arange(len(x))
+    first = allowed.argmax(axis=1)
+    last = allowed.shape[1] - 1 - allowed[:, ::-1].argmax(axis=1)
+    ds[f'{name}_time{suffix}'] = Var(times[idx])
+    ds[f'{name}_amp{suffix}'] = Var(x[rows, idx])
+    ds[f'{name}_edge{suffix}'] = Var(((idx == first) | (idx == last)).astype(int))
+    ds.info[f'{name}_anchor{suffix}'] = anchor_info
+    return ds
+
+
+def compare_peak_methods(data, names=('positive', 'negative'), group=None, suffix='_2'):
+    """Side by side: add_peak_1() columns (no suffix) vs add_peak_2() columns (`suffix`) already in `data`.
+
+    Prints each method's mean/SD of peak time and mean amplitude, how many
+    subjects' method-2 peaks sit on the edge of their search range, and a
+    paired t-test between the methods. With `group` (e.g. 'role'), also runs
+    the usual pairwise tests on peak time and amplitude, once per method.
+    """
+    from IPython.display import display
+    from eelbrain import test
+    from scipy import stats
+    methods = (('1', ''), ('2', suffix))
+    print(f"{'peak':<10}{'method':<8}{'time (ms)':>11}{'SD':>7}{'amp':>12}{'edge':>6}")
+    for name in names:
+        values = {}
+        for method, sfx in methods:
+            t = data[f'{name}_time{sfx}'].x * 1e3
+            a = data[f'{name}_amp{sfx}'].x
+            edge = int(data[f'{name}_edge{sfx}'].x.sum()) if sfx else '-'
+            values[method] = (t, a)
+            print(f"{name:<10}{method:<8}{t.mean():>11.1f}{t.std(ddof=1):>7.1f}{a.mean():>12.4g}{edge:>6}")
+        (t1, a1), (t2, a2) = values['1'], values['2']
+        if numpy.allclose(t1, t2) and numpy.allclose(a1, a2):
+            print(f"{'':<10}method 1 vs 2: identical for every subject")
+            continue
+        rt, ra = stats.ttest_rel(t1, t2), stats.ttest_rel(a1, a2)
+        print(f"{'':<10}method 1 vs 2 (paired): time t={rt.statistic:.2f} p={rt.pvalue:.3f}; amp t={ra.statistic:.2f} p={ra.pvalue:.3f}")
+    if group:
+        for name in names:
+            for measure in ('time', 'amp'):
+                for method, sfx in methods:
+                    display(test.pairwise(f'{name}_{measure}{sfx}', group, match='subject', data=data, corr=False,
+                                          title=f'{name} peak {measure} by {group}, method {method}'))
+
+
 def print_peak_table(data, kind, group):
     "Per-subject table of one peak's time (ms) and amplitude, broken down by `group` (e.g. 'role'/'masking')"
     print(f"\n{kind} peak")
