@@ -68,8 +68,10 @@ What runs, top to bottom, the moment this file is imported
   ready-to-use pipeline object, `e`, that every analysis script imports.
   This is the only line that produces something other scripts use.
 """
-from eelbrain import Factor, NDVar, Var, configure, gui, plot, resample, table
+from eelbrain import Factor, NDVar, Var, configure, gui, load, plot, resample, save, table
 from eelbrain.pipeline import *
+import hashlib
+import json
 # Private import: this is the exception eelbrain itself raises when a saved
 # ICA file no longer matches the bad channels (or other raw settings) it was
 # fit against - see _ica_is_stale() below. Not part of eelbrain's public API,
@@ -940,11 +942,16 @@ def set_partitions(partitions):
         More folds: each fit trains on a larger share of the data, but
         fitting takes proportionally longer.
     """
-    global e
+    global e, _partitions
     estimators = {'boosting': Boosting(**{**BOOSTING_SETTINGS, 'partitions': partitions})}
     cls = type(BinauralCocktail.__name__, (BinauralCocktail,), {'estimators': estimators, '__module__': __name__})
     e = cls(DATA_ROOT)
+    _partitions = partitions
     return e
+
+
+# Partitions `e` was built with; part of every saved result's key.
+_partitions = BOOSTING_SETTINGS['partitions']
 
 
 def _bids_value(s):
@@ -1155,6 +1162,8 @@ ANALYSIS = {
     'taper_floor': 0.1,             # display taper: share of the TRF kept before taper[0]
     'end_taper': 0.050,             # display taper: fade-out at the end of the fit window
     'plot_window': (-0.050, 0.550), # time range TRF plots show
+    'results_mode': None,           # None: eelbrain cache only; 'load'/'compute': saved results (see load_trfs_saved)
+    'bin_error': 'sd',              # band around each frequency bin in plot_trf_bins(): 'sd' or 'sem' across subjects
 }
 
 
@@ -1202,13 +1211,67 @@ def level_onset(tier, role=MIX):
     return f"{role}gammatone-on-{tier}-8"
 
 
+# Saved results
+#
+# With results_mode configured, every TRF fit and model test is kept as a
+# plain pickle in RESULTS_DIR, named by a hash of everything that defines
+# it (model, epoch, fit parameters, partitions, test settings). Reading
+# one back never goes through eelbrain's cache, so it does not depend on
+# input file times and never asks questions. The cluster computes them
+# (results_mode 'compute'); the Mac only downloads and reads them
+# ('load', see cluster/fetch_results.sh).
+
+RESULTS_DIR = Path(DATA_ROOT) / 'derivatives' / 'results'
+
+
+def _saved_result(kind, spec, compute):
+    mode = ANALYSIS['results_mode']
+    if mode is None:
+        return compute()
+    if mode not in ('load', 'compute'):
+        raise ValueError(f"results_mode={mode!r}; use 'load' or 'compute'")
+    key = hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
+    path = RESULTS_DIR / f"{kind}-{spec['epoch']}-{key}.pickle"
+    if path.exists():
+        return load.unpickle(path)
+    what = spec.get('model') or spec.get('comparison')
+    if mode == 'load':
+        raise FileNotFoundError(
+            f"No saved {kind} result for {what!r} ({spec['epoch']}): {path}\n"
+            f"Compute it on the cluster (sbatch cluster/run_analysis.sbatch), then fetch it with "
+            f"cluster/fetch_results.sh, or set COCKTAIL_RESULTS=compute to fit it here.")
+    print(f"Computing {kind} {what!r} ({spec['epoch']}) -> {path.name}")
+    out = compute()
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(path.name + '.part')
+    save.pickle(out, part)
+    part.replace(path)
+    path.with_suffix('.json').write_text(json.dumps(spec, indent=1, sort_keys=True))
+    return out
+
+
+def load_trfs_saved(model, epoch):
+    "All subjects' TRFs for `model` in `epoch` (load_trfs('all', ...)), from the saved results"
+    parameters = _setting('parameters')
+    spec = {'model': model, 'epoch': epoch, 'parameters': parameters, 'partitions': _partitions}
+    return _saved_result('trfs', spec, lambda: e.load_trfs('all', model, epoch=epoch, **parameters))
+
+
 # Model comparisons
 
 def _model_test(comparison, epoch, roi, metric):
     roi = _setting('roi', roi)
     metric = _setting('metric', metric)
-    data, result = e.load_model_test(
-        comparison, **_setting('parameters'), pmin=ANALYSIS['pmin'], metric=metric, epoch=epoch, return_data=True)
+    parameters = _setting('parameters')
+    pmin = ANALYSIS['pmin']
+
+    def compute():
+        return e.load_model_test(
+            comparison, **parameters, pmin=pmin, metric=metric, epoch=epoch, return_data=True)
+
+    spec = {'comparison': comparison, 'epoch': epoch, 'parameters': parameters, 'partitions': _partitions,
+            'pmin': pmin, 'metric': metric}
+    data, result = _saved_result('test', spec, compute)
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
     diff[f'roi_{metric}'] = diff[metric].mean(sensor=roi)
     return data, diff, result
@@ -1332,6 +1395,11 @@ add_peak_1 = add_peak
 
 
 def add_peak_2(ds, name, window, kind='max', halfwidth=0.025, by=None, suffix='_2'):
+    "add_anchored_peak() with '_2' column names, as cortical_analysis.ipynb uses it next to add_peak_1"
+    return add_anchored_peak(ds, name, window, kind, halfwidth, by, suffix)
+
+
+def add_anchored_peak(ds, name, window, kind='max', halfwidth=0.025, by=None, suffix=''):
     """Like add_peak(), but each subject's peak is searched only near the group-average peak.
 
     The group-average of ds['trf_sm'] is searched for its largest (kind='max')
@@ -1394,3 +1462,63 @@ def print_peak_table(data, kind, group, suffix=''):
     print(f"{'subject':<10}{group:<10}{'time (ms)':>12}{'amp':>14}")
     for subject, g, t, amp in zip(data['subject'], data[group], data[f'{kind}_time{suffix}'], data[f'{kind}_amp{suffix}']):
         print(f"{subject:<10}{g:<10}{t * 1e3:>12.0f}{amp:>14.4g}")
+
+
+# TRFs per frequency bin
+
+def bin_trfs(data, column, subtract=None, roi=None):
+    "Per-subject, ROI-averaged TRF of each frequency bin (case, frequency, time), tapered and smoothed like extract_trf()'s 'trf_sm'"
+    roi = _setting('roi', roi)
+    trf = data[column].mean(sensor=roi)
+    if subtract is not None:
+        trf = trf - data[subtract].mean(sensor=roi)
+    trf = taper_prestim(trf, crop=False)
+    return resample(trf, 512).sub(time=ANALYSIS['plot_window'])
+
+
+def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
+    """TRF of each frequency bin in its own colour (lowest dark, highest yellow) with a band of
+    `error` ('sd' or 'sem' across subjects), the mean of the bins as a thick black line, and a key
+    of the bins' centre frequencies on the right. `subtract` names a second column taken away
+    first, e.g. the ignore column for an attention effect (attend - ignore)."""
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+
+    error = _setting('bin_error', error)
+    trf = bin_trfs(data, column, subtract, roi) * 1e3
+    x = trf.get_data(('case', 'frequency', 'time'))
+    times = trf.time.times * 1e3
+    freqs = trf.frequency.values
+    n = len(freqs)
+    mean = x.mean(axis=0)
+    spread = x.std(axis=0, ddof=1)
+    if error == 'sem':
+        spread = spread / numpy.sqrt(len(x))
+    elif error != 'sd':
+        raise ValueError(f"error={error!r}; use 'sd' or 'sem'")
+    colors = plt.colormaps['viridis'](numpy.linspace(0, 1, n))
+
+    fig, ax = plt.subplots(figsize=(5.5, 3))
+    for k in range(n):
+        ax.fill_between(times, mean[k] - spread[k], mean[k] + spread[k], color=colors[k], alpha=0.2, lw=0)
+    for k in range(n):
+        ax.plot(times, mean[k], color=colors[k], lw=1.4)
+    ax.plot(times, mean.mean(axis=0), color='black', lw=2.6, label=f'Mean of {n} bins')
+    ax.axhline(0, color='black', lw=0.6)
+    ax.axvline(0, color='black', lw=0.6)
+    ax.set_xlim(*(numpy.array(ANALYSIS['plot_window']) * 1e3))
+    ax.set_xlabel('Time [ms]')
+    ax.set_ylabel('V [normalized]')
+    ax.set_title(title)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.legend(frameon=False, fontsize=8)
+
+    key = ScalarMappable(norm=BoundaryNorm(numpy.arange(n + 1), n), cmap=ListedColormap(colors))
+    cbar = fig.colorbar(key, ax=ax, ticks=numpy.arange(n) + 0.5, fraction=0.06, pad=0.03, aspect=15)
+    cbar.set_ticklabels([f'{f:.0f}' for f in freqs])
+    cbar.ax.minorticks_off()
+    cbar.ax.tick_params(length=0, labelsize=8)
+    cbar.set_label('Center frequency (Hz)')
+    cbar.outline.set_visible(False)
+    return fig

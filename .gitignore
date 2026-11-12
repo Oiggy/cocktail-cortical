@@ -45,6 +45,16 @@ doc/auto_examples
 !analysis/cortical_analysis.ipynb
 !analysis/cortical_analysis_2.ipynb
 !analysis/cortical_analysis_3.ipynb
+# The per-condition notebooks (settings in analysis/parameters.py).
+!analysis/clean.ipynb
+!analysis/diotic.ipynb
+!analysis/diotic_overt_masked_onsets.ipynb
+!analysis/dichotic_left.ipynb
+!analysis/dichotic_left_overt_masked_onsets.ipynb
+!analysis/dichotic_right.ipynb
+!analysis/dichotic_right_overt_masked_onsets.ipynb
+!analysis/binaural.ipynb
+!analysis/binaural_overt_masked_onsets.ipynb
 # The artifact-cleaning project's notebooks, which live directly in
 # artifacts/ (never in its subfolders, which hold the code they call).
 !artifacts/*.ipynb

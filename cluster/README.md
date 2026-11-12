@@ -1,5 +1,42 @@
 # Running the analysis on an Alliance cluster
 
+## Per-condition notebooks: saved results
+
+The per-condition notebooks in `analysis/` (`clean.ipynb`, `diotic.ipynb`,
+`diotic_overt_masked_onsets.ipynb`, ... with shared settings in
+`parameters.py`) do not use eelbrain's cache on the Mac. Every TRF fit and
+model test they need is saved on the cluster as a plain file in
+`dataset/cocktail/bids/derivatives/results/`, and the Mac downloads and
+reads those files. Reading them never checks file times and never asks
+questions.
+
+1. **Compute** (on the cluster, from the repo root, after `git pull`):
+   ```
+   sbatch --account=def-ibruce cluster/run_analysis.sbatch
+   ```
+   Runs preprocessing, then every notebook with `COCKTAIL_RESULTS=compute`,
+   saving each result as soon as it is done. Fits already in the cluster's
+   eelbrain cache are read from it, so the first run after the
+   `cortical_analysis.ipynb` jobs is quick. After a TIMEOUT, submit again:
+   saved results are read back in seconds. To run only some notebooks:
+   ```
+   sbatch --account=def-ibruce --export=ALL,NOTEBOOKS="clean diotic" cluster/run_analysis.sbatch
+   ```
+2. **Fetch** (in a Mac terminal, from the repo root):
+   ```
+   bash cluster/fetch_results.sh
+   ```
+3. **Run** any notebook on the Mac. A result that was not fetched stops
+   with a message naming it. To fit one on the Mac instead, start Jupyter
+   with `COCKTAIL_RESULTS=compute jupyter lab`.
+
+Each result's file name holds a hash of what defines it (model, condition,
+`PARAMETERS`, `PARTITIONS`, `METRIC`, `PMIN`), with the details in a
+matching `.json`. Changing any of those in `parameters.py` needs a new
+cluster run; ROI, peak windows and plot settings do not.
+
+## cortical_analysis.ipynb: eelbrain cache
+
 The cluster runs `analysis/cortical_analysis.ipynb` top to bottom on a
 compute node, which fills the eelbrain cache (every TRF fit and model
 comparison) under `dataset/cocktail/bids/derivatives/`. You copy that
