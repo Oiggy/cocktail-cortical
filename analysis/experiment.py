@@ -76,6 +76,7 @@ import json
 import pickle
 import shlex
 import subprocess
+import time
 # Private import: this is the exception eelbrain itself raises when a saved
 # ICA file no longer matches the bad channels (or other raw settings) it was
 # fit against - see _ica_is_stale() below. Not part of eelbrain's public API,
@@ -1265,10 +1266,21 @@ def _cluster(command):
     proc = subprocess.run(
         ['ssh', '-o', 'BatchMode=yes', '-o', f'ControlPath={CONTROL_PATH}', host, command], capture_output=True)
     if proc.returncode == 255:
-        raise ConnectionError(
-            f"No open connection to {host}. In a terminal, from the repo folder, run (one Duo login, "
-            f"stays open 12 hours):\n    bash cluster/connect.sh\nssh said: {proc.stderr.decode().strip()}")
+        raise ClusterConnectionError(
+            f"No open connection to the cluster ({host}). In a Mac terminal, from the repo folder, run\n"
+            f"    bash cluster/connect.sh\n"
+            f"(one Duo login, stays open 12 hours), then run the notebook again.")
     return proc
+
+
+class _PlainMessage:
+    "In a notebook, show only the message, without a traceback"
+    def _render_traceback_(self):
+        return [str(self)]
+
+
+class ClusterConnectionError(_PlainMessage, ConnectionError):
+    "No open SSH connection to the cluster"
 
 
 def _remote_file(name):
@@ -1319,12 +1331,13 @@ def _saved_result(kind, spec, compute):
 
     path = RESULTS_DIR / name
     if path.exists():
-        return load.unpickle(path)
+        return pickle.loads(path.read_bytes())
     print(f"Computing {kind} {what!r} ({spec['epoch']}) -> {path.name}")
     out = compute()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     part = path.with_name(path.name + '.part')
-    save.pickle(out, part)
+    with open(part, 'wb') as file:
+        pickle.dump(out, file, protocol=pickle.HIGHEST_PROTOCOL)
     part.replace(path)
     path.with_suffix('.json').write_text(json.dumps(spec, indent=1, sort_keys=True))
     return out
@@ -1386,19 +1399,30 @@ def cluster_log(job=None, lines=40):
     if ANALYSIS['results_mode'] == 'compute':
         print("Inside a cluster job: skipped.")
         return
+    print(_job_log(job, lines))
+
+
+def _job_log(job=None, lines=40):
     pattern = f"cocktail-*-{int(job)}.out" if job else "cocktail-*.out"
     command = (
         f"cd {shlex.quote(_setting('cluster_repo'))}/cluster/runs && "
         f"f=$(ls -t {pattern} 2>/dev/null | head -1); "
         f"if [ -n \"$f\" ]; then echo \"== $f\"; tail -n {int(lines)} \"$f\"; else echo 'No job log found.'; fi")
     proc = _cluster(command)
-    print(proc.stdout.decode() or proc.stderr.decode())
+    return (proc.stdout.decode() or proc.stderr.decode()).rstrip()
+
+
+def _job_state(job):
+    "How a finished job ended (COMPLETED, FAILED, TIMEOUT, CANCELLED, ...), from Slurm's accounting"
+    proc = _cluster(f"bash -lc 'sacct -j {int(job)} -n -X -o State'")
+    states = proc.stdout.decode().split()
+    return states[0] if states else 'unknown'
 
 
 # Checking a notebook's results before it runs
 
-class ResultsNotReady(Exception):
-    "Some results a notebook reads are not on the cluster yet; the message says what was done about it"
+class ResultsNotReady(_PlainMessage, Exception):
+    "Some results a notebook reads are not on the cluster and could not be computed; the message says why"
 
 
 def _cluster_listing():
@@ -1464,6 +1488,15 @@ def _request_record(notebook, write=None):
     return json.loads(out) if out else None
 
 
+def _forget_request(notebook):
+    "Remove the cluster's record of the last automatic request for `notebook` (its job succeeded)"
+    rel = f"{_setting('cluster_results')}/requests/{notebook}.json"
+    if _on_cluster():
+        (Path.home() / rel).unlink(missing_ok=True)
+    else:
+        _cluster(f"rm -f {shlex.quote(rel)}")
+
+
 def _unpushed_changes():
     "Changes to the code the cluster runs that are on this computer but not on GitHub, or None"
     repo = Path(__file__).resolve().parent.parent
@@ -1485,16 +1518,21 @@ def _unpushed_changes():
 
 
 def check_results(notebook, namespace=None):
-    """Make sure every result `notebook` reads is on the cluster, asking the cluster for any that are not.
+    """Make sure every result `notebook` reads is on the cluster, computing any that are not.
 
-    Meant as the first cell after the imports. All there: prints so and the
-    notebook carries on. Some missing: submits a job for this notebook and
-    stops it with ResultsNotReady, saying to run it again once the job has
-    finished. It does not submit when a job for this notebook is already
-    queued, when the last job already ran for the same results without
-    saving them (see its cluster_log), or, from the Mac, when parameters.py
-    or experiment.py have changes that are not on GitHub (the cluster would
-    compute with the old settings). Does nothing inside a cluster job."""
+    Meant as the first cell after the imports. All there: says so and the
+    notebook carries on. Some missing: submits a job for this notebook (or
+    joins one already queued for it), waits for it with a short progress
+    line, and carries on once the results are there. So one Run All goes
+    from start to finish; the computer has to stay awake while it waits.
+
+    It stops, with a plain message, only when something needs attention:
+    the job ended without saving the results (the message shows the end of
+    its log; no new job is submitted for the same results until
+    submit_cluster_run() is called by hand), or, from the Mac, parameters.py
+    or experiment.py have changes that are not on GitHub (the cluster runs
+    the code on GitHub, so it would compute with the old settings). Does
+    nothing inside a cluster job."""
     mode = ANALYSIS['results_mode']
     if mode in (None, 'compute'):
         return
@@ -1509,27 +1547,71 @@ def check_results(notebook, namespace=None):
         print(f"All {len(needed)} results this notebook reads are on the cluster.")
         return
     status = f"{len(missing)} of {len(needed)} results this notebook reads are not on the cluster yet"
-    again = "Run the notebook again once it has finished (cluster_queue() lists it until then; the cluster also emails)."
 
     jobs = _queued_jobs(notebook)
     if jobs:
-        listed = ', '.join(f'{job} ({state})' for job, state in jobs)
-        raise ResultsNotReady(f"{status}; job {listed} is computing them. {again}")
-    record = _request_record(notebook)
-    if record and set(missing) <= set(record['missing']):
-        raise ResultsNotReady(
-            f"{status}, and job {record['job']} already ran for them without saving them, so nothing was "
-            f"submitted again. See what went wrong with cluster_log({record['job']}); once it is fixed (and "
-            f"pushed to GitHub), ask again with submit_cluster_run('{notebook}').")
-    if mode == 'remote':
-        unpushed = _unpushed_changes()
-        if unpushed:
-            raise ResultsNotReady(
-                f"{status}, but this computer has {unpushed}. The cluster runs the code on GitHub, so it would "
-                f"compute with the old settings. Commit and push (GitHub Desktop), then run this cell again.")
-    job = submit_cluster_run(notebook)
-    _request_record(notebook, write={'job': job, 'missing': missing})
-    raise ResultsNotReady(f"{status}, so job {job} was submitted to compute them. {again}")
+        job = jobs[0][0]
+        print(f"{status}; job {job} is already computing them.")
+    else:
+        record = _request_record(notebook)
+        if record and set(missing) <= set(record['missing']):
+            _job_failed(notebook, record['job'], missing, len(needed), earlier=True)
+        if mode == 'remote':
+            unpushed = _unpushed_changes()
+            if unpushed:
+                raise ResultsNotReady(
+                    f"{status}, but this computer has {unpushed}. The cluster runs the code on GitHub, so it "
+                    f"would compute with the old settings. Commit and push them (GitHub Desktop), then run the "
+                    f"notebook again.")
+        print(f"{status}; asking the cluster for them.")
+        job = submit_cluster_run(notebook)
+        _request_record(notebook, write={'job': job, 'missing': missing})
+
+    _wait_for(notebook, job)
+    still = sorted(set(missing) - _cluster_listing())
+    if still:
+        _job_failed(notebook, job, still, len(needed))
+    _forget_request(notebook)
+    print(f"Job {job} is done: all {len(needed)} results are on the cluster. Carrying on with the notebook.")
+    import parameters
+    if hasattr(parameters, 'refresh_ylims'):
+        parameters.refresh_ylims()  # the shared y ranges now cover the new results too
+
+
+def _wait_for(notebook, job, poll=60):
+    "Wait until no cluster job for `notebook` is waiting or running, printing a line whenever its state changes"
+    started, last = time.time(), None
+    print(f"Waiting for job {job} (checked every minute; the cluster also emails when it ends). "
+          f"Interrupting only stops the waiting, not the job.")
+    try:
+        while True:
+            jobs = _queued_jobs(notebook)
+            if not jobs:
+                return
+            state = ', '.join(f'{j} {s}' for j, s in jobs)
+            if state != last:
+                print(f"  {time.strftime('%H:%M')}  {state}  ({(time.time() - started) / 60:.0f} min so far)")
+                last = state
+            time.sleep(poll)
+    except ClusterConnectionError:
+        raise ClusterConnectionError(
+            f"The connection to the cluster closed while waiting (the laptop slept?). Job {job} keeps running "
+            f"on the cluster. Run  bash cluster/connect.sh  in a Mac terminal, then run the notebook again: it "
+            f"picks the job up where it is.") from None
+    except KeyboardInterrupt:
+        raise ResultsNotReady(f"Stopped waiting. Job {job} keeps running on the cluster; run the notebook again "
+                              f"to wait for it, or once it has finished.") from None
+
+
+def _job_failed(notebook, job, missing, n_needed, earlier=False):
+    "Stop with what went wrong: how the job ended and the end of its log"
+    when = "already ran" if earlier else "ended"
+    raise ResultsNotReady(
+        f"Job {job} {when} without saving {len(missing)} of the {n_needed} results this notebook reads "
+        f"(Slurm says: {_job_state(job)}), so nothing more was submitted. The end of its log:\n\n"
+        f"{_job_log(job, 25)}\n\n"
+        f"Send this to Claude. Once it is fixed (and pushed to GitHub), run submit_cluster_run('{notebook}') "
+        f"and then the notebook again.")
 
 
 # Model comparisons

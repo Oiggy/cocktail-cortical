@@ -38,7 +38,7 @@ from experiment import (
     ATTEND, IGNORE, MIX, envelope, onset, overt_onset, masked_onset, level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
-    print_peak_table, plot_trf_bins, shared_ylims, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady,
+    print_peak_table, plot_trf_bins, shared_ylims, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError,
 )
 import matplotlib.pyplot as plt
 import numpy
@@ -178,8 +178,18 @@ configure_analysis(
 TRF_YLIM = None      # attend/ignore/mix and overt/masked overlays (frequency-summed TRFs)
 TRF_BIN_YLIM = None  # per-bin TRF and attention-effect plots
 
-_auto_ylim, _auto_bin_ylim = shared_ylims()
-TRF_YLIM = TRF_YLIM or _auto_ylim
-TRF_BIN_YLIM = TRF_BIN_YLIM or _auto_bin_ylim
-TRF_YLIM_ARGS = dict(bottom=TRF_YLIM[0], top=TRF_YLIM[1]) if TRF_YLIM else {}
-configure_analysis(bin_ylim=TRF_BIN_YLIM)
+# The ranges in use: the overlays read TRF_YLIM_ARGS, the per-bin plots the configured bin_ylim
+TRF_YLIM_ARGS = {}
+
+
+def refresh_ylims():
+    "Work out the shared y ranges again (check_results() calls this once a cluster job has added results)"
+    auto_ylim, auto_bin_ylim = shared_ylims()
+    ylim = TRF_YLIM or auto_ylim
+    TRF_YLIM_ARGS.clear()  # changed in place, so the notebooks' own name for it sees the change
+    if ylim:
+        TRF_YLIM_ARGS.update(bottom=ylim[0], top=ylim[1])
+    configure_analysis(bin_ylim=TRF_BIN_YLIM or auto_bin_ylim)
+
+
+refresh_ylims()

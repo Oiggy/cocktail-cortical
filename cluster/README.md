@@ -29,16 +29,16 @@ disk. Nothing runs or is stored on your own computer, so any browser works
    notebook, and pick the **Python (cocktail-cortical)** kernel.
 4. **Run All.** The `check_results(...)` cell at the top checks that every
    result the notebook reads is on the cluster. If any are missing it
-   submits a job for that notebook by itself and stops the notebook there.
-   The job runs on its own, so the browser can be closed meanwhile; the
-   cluster emails when it ends, and the `cluster_queue()` cell lists it
-   until then. Then Run All again.
+   submits a job for that notebook by itself (or joins one already queued),
+   waits for it with a short progress line, and then carries on, so one Run
+   All goes from start to finish. The cluster also emails when the job ends.
 
-   It does not submit when a job for the notebook is already queued, or
-   when the last job already ran for the same results without saving them
-   (it points to that job's log, shown by the `cluster_log()` cell, instead).
-   After fixing such a failure, ask again with `submit_cluster_run('diotic')`
-   (or `submit_cluster_run()` for every notebook).
+   It stops, with a plain message, only when something needs attention: the
+   job ended without saving the results (the message shows the end of its
+   log, and nothing is resubmitted for the same results until
+   `submit_cluster_run('diotic')` is run by hand), or the connection closed
+   while waiting (the job keeps running; run the notebook again to pick it
+   up).
 
 Edits made in JupyterHub are in the cluster's copy of the repo and are
 what submitted jobs run. To keep the Mac and GitHub in sync, commit and
@@ -56,7 +56,8 @@ is needed.
    bash cluster/connect.sh
    ```
 2. **Run All** in any notebook, in VS Code or Jupyter. Missing results
-   are asked for by the `check_results(...)` cell, as above. From the Mac,
+   are asked for and waited for by the `check_results(...)` cell, as above;
+   keep the laptop awake while it waits. From the Mac,
    the cluster first updates its copy to GitHub's main branch, so the
    check refuses to submit while `parameters.py` or `experiment.py` have
    changes that are not pushed: commit and push them first.
