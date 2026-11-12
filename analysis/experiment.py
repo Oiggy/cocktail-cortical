@@ -924,10 +924,10 @@ class BinauralCocktail(Pipeline):
 
 # Creating the pipeline instance here means other scripts can just do
 # `from experiment import e` instead of repeating this setup. Not when the
-# per-condition notebooks only read results from the cluster
-# (COCKTAIL_RESULTS=remote): they need no local dataset and must not
-# write anything there.
-e = None if os.environ.get('COCKTAIL_RESULTS') == 'remote' else BinauralCocktail(DATA_ROOT)
+# per-condition notebooks only read saved results (COCKTAIL_RESULTS
+# 'remote' on the Mac, 'cluster' in the cluster's JupyterHub): they need no
+# pipeline and must not write anything.
+e = None if os.environ.get('COCKTAIL_RESULTS') in ('remote', 'cluster') else BinauralCocktail(DATA_ROOT)
 
 
 def set_partitions(partitions, build=True):
@@ -1173,7 +1173,7 @@ ANALYSIS = {
     'taper_floor': 0.1,             # display taper: share of the TRF kept before taper[0]
     'end_taper': 0.050,             # display taper: fade-out at the end of the fit window
     'plot_window': (-0.050, 0.550), # time range TRF plots show
-    'results_mode': None,           # None: eelbrain cache only; 'remote'/'compute': saved results on the cluster (see _saved_result)
+    'results_mode': None,           # None: eelbrain cache only; 'remote'/'cluster'/'compute': saved results on the cluster (see _saved_result)
     'bin_error': 'sd',              # band around each frequency bin in plot_trf_bins(): 'sd' or 'sem' across subjects
     'bin_ylim': None,               # (bottom, top) shared by every plot_trf_bins() plot; None = each plot's own
     'save_figures': True,           # topomaps also saved as PNG files under FIGURES_DIR
@@ -1234,9 +1234,10 @@ def level_onset(tier, role=MIX):
 # cluster as a plain pickle in RESULTS_DIR, named by a hash of everything
 # that defines it (model, epoch, fit parameters, partitions, test settings).
 # The cluster computes them (results_mode 'compute', run by
-# cluster/run_analysis.sbatch). The per-condition notebooks on the Mac
-# (results_mode 'remote') read each one straight from the cluster over SSH
-# into memory: nothing is written on the Mac, and eelbrain's cache is never
+# cluster/run_analysis.sbatch). The per-condition notebooks read them
+# without computing or writing anything: in the cluster's JupyterHub
+# (results_mode 'cluster') straight from the cluster's disk, and on the Mac
+# (results_mode 'remote') over SSH into memory. eelbrain's cache is never
 # involved.
 
 RESULTS_DIR = Path(DATA_ROOT) / 'derivatives' / 'results'
@@ -1249,8 +1250,16 @@ NOTEBOOKS = (
 _remote_results = {}  # results read from the cluster in this session, kept in memory only
 
 
+def _on_cluster():
+    return ANALYSIS['results_mode'] == 'cluster'
+
+
 def _cluster(command):
-    "Run a shell command on the cluster over the open connection (stdout as bytes)"
+    "Run a shell command on the cluster: directly when already there, else over the open SSH connection (stdout as bytes)"
+    if _on_cluster():
+        # Not this JupyterHub session's own Slurm settings: a submitted job gets its own
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('SLURM_', 'SBATCH_')) and k != 'COCKTAIL_RESULTS'}
+        return subprocess.run(['bash', '-c', command], cwd=Path.home(), env=env, capture_output=True)
     host = _setting('cluster_host')
     proc = subprocess.run(
         ['ssh', '-o', 'BatchMode=yes', '-o', f'ControlPath={CONTROL_PATH}', host, command], capture_output=True)
@@ -1263,6 +1272,9 @@ def _cluster(command):
 
 def _remote_file(name):
     "Contents of the cluster's RESULTS_DIR/`name`, or None if it is not there"
+    if _on_cluster():
+        local = Path.home() / _setting('cluster_results') / name
+        return local.read_bytes() if local.exists() else None
     path = shlex.quote(f"{_setting('cluster_results')}/{name}")
     proc = _cluster(f"if [ -f {path} ]; then cat {path}; else exit 3; fi")
     if proc.returncode == 3:
@@ -1276,12 +1288,12 @@ def _saved_result(kind, spec, compute):
     mode = ANALYSIS['results_mode']
     if mode is None:
         return compute()
-    if mode not in ('remote', 'compute'):
-        raise ValueError(f"results_mode={mode!r}; use 'remote' or 'compute'")
+    if mode not in ('remote', 'cluster', 'compute'):
+        raise ValueError(f"results_mode={mode!r}; use 'remote', 'cluster' or 'compute'")
     key = hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
     name = f"{kind}-{spec['epoch']}-{key}.pickle"
     what = spec.get('model') or spec.get('comparison')
-    if mode == 'remote':
+    if mode in ('remote', 'cluster'):
         if name not in _remote_results:
             data = _remote_file(name)
             if data is None:
@@ -1316,15 +1328,17 @@ def load_trfs_saved(model, epoch):
 def submit_cluster_run(*notebooks):
     """Ask the cluster to compute what these notebooks need (every notebook if none are named).
 
-    Brings the cluster's copy of the repo up to date with GitHub's main
-    branch (so commit and push changes first), then submits
-    cluster/run_analysis.sbatch for them. Returns the job ID."""
+    From the Mac, first brings the cluster's copy of the repo up to date
+    with GitHub's main branch (so commit and push changes first). In the
+    cluster's JupyterHub, runs that copy as it is, edits included. Then
+    submits cluster/run_analysis.sbatch for them. Returns the job ID."""
     unknown = set(notebooks) - set(NOTEBOOKS)
     if unknown:
         raise ValueError(f"Unknown notebook(s) {sorted(unknown)}; choose from {NOTEBOOKS}")
     export = 'ALL' + (f",NOTEBOOKS={' '.join(notebooks)}" if notebooks else '')
+    update = '' if _on_cluster() else 'git pull --no-rebase --no-edit origin main && '
     command = (
-        f"cd {shlex.quote(_setting('cluster_repo'))} && git pull --no-rebase --no-edit origin main && "
+        f"cd {shlex.quote(_setting('cluster_repo'))} && {update}"
         f"sbatch --account={shlex.quote(_setting('cluster_account'))} --export={shlex.quote(export)} "
         f"cluster/run_analysis.sbatch")
     proc = _cluster(f"bash -lc {shlex.quote(command)}")
@@ -1624,12 +1638,12 @@ def shared_ylims(pad=0.05):
     subjects (the attend/ignore/mix and overt/masked overlays); `per_bin` covers each bin's mean
     +- bin_error band, for every column and every attend - ignore effect. Kept in
     RESULTS_DIR/ylims.json and worked out again only when the saved fits or settings change.
-    (None, None) when there are no saved fits. With results_mode 'remote' the ranges are read from
+    (None, None) when there are no saved fits. With results_mode 'remote'/'cluster' the ranges are read from
     the cluster's ylims.json (worked out there at the end of each cluster run)."""
     parameters = _setting('parameters')
     settings = {name: ANALYSIS[name] for name in ('roi', 'plot_window', 'taper', 'taper_floor', 'end_taper', 'bin_error')}
     defined_by = json.loads(json.dumps({'parameters': parameters, 'partitions': _partitions, 'settings': settings, 'pad': pad}))
-    if ANALYSIS['results_mode'] == 'remote':
+    if ANALYSIS['results_mode'] in ('remote', 'cluster'):
         data = _remote_file('ylims.json')
         if data is None:
             return None, None

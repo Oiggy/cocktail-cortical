@@ -1,33 +1,66 @@
 # Running the analysis on an Alliance cluster
 
-## Per-condition notebooks: notebook <-> cluster
+## Per-condition notebooks: everything on the cluster
 
 The per-condition notebooks in `analysis/` (`clean.ipynb`, `diotic.ipynb`,
 `diotic_overt_masked_onsets.ipynb`, ... with shared settings in
-`parameters.py`) talk to the cluster directly. Every TRF fit and model
-test is computed and kept on the cluster, in
-`dataset/cocktail/bids/derivatives/results/`. A notebook on the Mac reads
-each result from there over SSH straight into memory: nothing is saved on
-the Mac, no local dataset is needed, and eelbrain's cache is never
-involved.
+`parameters.py`) never compute or save anything themselves. Every TRF fit
+and model test is computed and kept on the cluster, in
+`dataset/cocktail/bids/derivatives/results/`, and the notebooks only read
+them. eelbrain's cache is never involved.
+
+### From any browser, laptop closed: the cluster's JupyterHub
+
+The notebooks run on the cluster itself and read the results from its
+disk. Nothing runs or is stored on your own computer, so any browser works
+(a phone included) and the laptop can stay closed.
+
+1. **One-time setup** (in a cluster terminal, from the repo root, after
+   `cluster/setup_env.sh`):
+   ```
+   bash cluster/setup_jupyterhub.sh
+   ```
+2. **Open the cluster's JupyterHub** in a browser and log in (Alliance
+   account and Duo). Narval's address is listed on the Alliance
+   documentation's "JupyterHub" page. Choose a session size and length:
+   reading results and plotting needs little (for example 1 to 2 CPUs,
+   8 GB, a few hours).
+3. **Open** `projects/def-ibruce/iggy/cocktail-cortical/analysis/` and any
+   notebook, and pick the **Python (cocktail-cortical)** kernel.
+4. **Missing results:** the notebook stops and says which. Ask for them
+   from the notebook:
+   ```
+   submit_cluster_run('diotic')   # or submit_cluster_run() for every notebook
+   cluster_queue()                # pending/running jobs; empty = finished
+   ```
+   The job runs on its own, so the browser can be closed meanwhile; the
+   cluster emails when it ends. Then run the cell again.
+
+Edits made in JupyterHub are in the cluster's copy of the repo and are
+what submitted jobs run. To keep the Mac and GitHub in sync, commit and
+push them from a JupyterHub terminal.
+
+### From the Mac
+
+The notebooks run on the Mac and read each result from the cluster over
+SSH straight into memory: nothing is saved on the Mac and no local dataset
+is needed.
 
 1. **Connect** (in a Mac terminal, from the repo root; one Duo login,
    stays open 12 hours, run again after the laptop sleeps):
    ```
    bash cluster/connect.sh
    ```
-2. **Run** any notebook. Results the cluster already has load in seconds.
-3. **Missing results:** the notebook stops and says which. Ask the
-   cluster for them from the notebook itself (commit and push code
-   changes first: the cluster updates to GitHub's main branch before
-   running):
-   ```
-   submit_cluster_run('diotic')   # or submit_cluster_run() for every notebook
-   cluster_queue()                # pending/running jobs; empty = finished
-   ```
-   Then run the cell again. From a cluster terminal the same job is
-   `sbatch --account=def-ibruce cluster/run_analysis.sbatch`, with
-   `--export=ALL,NOTEBOOKS="clean diotic"` to limit it.
+2. **Run** any notebook. Missing results: as above,
+   `submit_cluster_run(...)` and `cluster_queue()`. From the Mac, the
+   cluster first updates its copy to GitHub's main branch, so commit and
+   push code changes first.
+
+### The cluster job
+
+From a cluster terminal the job is
+`sbatch --account=def-ibruce cluster/run_analysis.sbatch`, with
+`--export=ALL,NOTEBOOKS="clean diotic"` to limit it.
 
 The job saves each result as soon as it is done, so after a TIMEOUT just
 submit again: what is already saved is read back in seconds. Fits already

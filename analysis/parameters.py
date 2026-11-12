@@ -5,21 +5,32 @@ cortical_analysis.ipynb lives here, so each notebook (clean.ipynb,
 diotic.ipynb, diotic_overt_masked_onsets.ipynb, ...) can run on its own
 after a single `from parameters import *`.
 
-The only pathway is notebook <-> cluster. The cluster computes every TRF
-fit and model test and saves it there (cluster/run_analysis.sbatch, with
-COCKTAIL_RESULTS=compute). The notebooks on the Mac read each result
-straight from the cluster over SSH into memory (COCKTAIL_RESULTS=remote,
-the default): nothing is saved on the Mac, no local dataset is needed, and
-eelbrain's cache is never involved. Open the connection once per session
-with `bash cluster/connect.sh`; ask the cluster for missing results from a
-notebook with submit_cluster_run() and follow it with cluster_queue().
+The cluster computes every TRF fit and model test and keeps it there
+(cluster/run_analysis.sbatch, with COCKTAIL_RESULTS=compute). The notebooks
+only read them, never computing or saving anything:
+- in the cluster's JupyterHub (from any browser; the laptop can stay
+  closed), straight from the cluster's disk;
+- on the Mac, over SSH into memory, after `bash cluster/connect.sh`.
+Either way, ask the cluster for missing results from a notebook with
+submit_cluster_run() and follow it with cluster_queue().
 """
 import os
+from pathlib import Path
 
-# 'remote': read results from the cluster (the Mac). 'compute': fit and
-# save whatever is missing (the cluster job sets this). Set before
-# experiment.py is imported: in 'remote' it builds no local pipeline.
-RESULTS_MODE = os.environ.setdefault('COCKTAIL_RESULTS', 'remote')
+# The cluster: where results are computed and kept.
+CLUSTER_HOST = 'iggy@narval.alliancecan.ca'
+CLUSTER_ACCOUNT = 'def-ibruce'
+CLUSTER_REPO = 'projects/def-ibruce/iggy/cocktail-cortical'  # relative to the home folder there
+CLUSTER_RESULTS = 'projects/def-ibruce/iggy/dataset/cocktail/bids/derivatives/results'
+
+# Running from the cluster's own copy of the repo (its JupyterHub)?
+ON_CLUSTER = Path(__file__).resolve().parent.parent == (Path.home() / CLUSTER_REPO).resolve()
+
+# 'cluster': read results from the cluster's disk (JupyterHub there).
+# 'remote': read them from the cluster over SSH (the Mac). 'compute': fit
+# and save whatever is missing (the cluster job sets this). Set before
+# experiment.py is imported: when only reading, it builds no pipeline.
+RESULTS_MODE = os.environ.setdefault('COCKTAIL_RESULTS', 'cluster' if ON_CLUSTER else 'remote')
 
 from eelbrain import *
 from experiment import (
@@ -32,12 +43,6 @@ from experiment import (
 import matplotlib.pyplot as plt
 import numpy
 import seaborn as sns
-
-# The cluster: where results are computed and kept.
-CLUSTER_HOST = 'iggy@narval.alliancecan.ca'
-CLUSTER_ACCOUNT = 'def-ibruce'
-CLUSTER_REPO = 'projects/def-ibruce/iggy/cocktail-cortical'  # relative to the home folder there
-CLUSTER_RESULTS = 'projects/def-ibruce/iggy/dataset/cocktail/bids/derivatives/results'
 
 # Plots are shown in the notebook only; no image files are written.
 SAVE_FIGURES = False
