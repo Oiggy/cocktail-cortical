@@ -46,9 +46,6 @@ for nb in $NOTEBOOKS; do
         --output-dir "$REPO/cluster/runs" --output "${nb}_${SLURM_JOB_ID}.ipynb" || failed+=("$nb")
 done
 
-# Shared y ranges for the plots, worked out over every saved result (ylims.json)
-python -c "from parameters import *" || failed+=("shared y ranges")
-
 echo "=== saved results: $(ls "$RESULTS" 2>/dev/null | grep -c '\.pickle$')"
 if [ ${#failed[@]} -gt 0 ]; then
     echo "FAILED: ${failed[*]} (see cluster/runs/<notebook>_${SLURM_JOB_ID}.ipynb)"

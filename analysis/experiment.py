@@ -1177,7 +1177,6 @@ ANALYSIS = {
     'plot_window': (-0.050, 0.550), # time range TRF plots show
     'results_mode': None,           # None: eelbrain cache only; 'remote'/'cluster'/'compute': saved results on the cluster (see _saved_result)
     'bin_error': 'sd',              # band around each frequency bin in plot_trf_bins(): 'sd' or 'sem' across subjects
-    'bin_ylim': None,               # (bottom, top) shared by every plot_trf_bins() plot; None = each plot's own
     'save_figures': True,           # topomaps also saved as PNG files under FIGURES_DIR
     'cluster_host': None,           # user@address of the cluster, e.g. 'iggy@narval.alliancecan.ca'
     'cluster_repo': None,           # the repo on the cluster, relative to the home folder there
@@ -1573,9 +1572,6 @@ def check_results(notebook, namespace=None):
         _job_failed(notebook, job, still, len(needed))
     _forget_request(notebook)
     print(f"Job {job} is done: all {len(needed)} results are on the cluster. Carrying on with the notebook.")
-    import parameters
-    if hasattr(parameters, 'refresh_ylims'):
-        parameters.refresh_ylims()  # the shared y ranges now cover the new results too
 
 
 def _wait_for(notebook, job, poll=60):
@@ -1850,8 +1846,8 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     """TRF of each frequency bin in its own colour (lowest dark, highest yellow) with a band of
     `error` ('sd' or 'sem' across subjects), the mean of the bins as a thick black line, and a key
     of the bins' centre frequencies on the right. `subtract` names a second column taken away
-    first, e.g. the ignore column for an attention effect (attend - ignore). The y range is the
-    configured `bin_ylim`, shared by every per-bin plot."""
+    first, e.g. the ignore column for an attention effect (attend - ignore). The y axis fits the
+    waveforms, so their peaks fill the plot; wide bands may run past its edges."""
     import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import BoundaryNorm, ListedColormap
@@ -1869,8 +1865,9 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     ax.axhline(0, color='black', lw=0.6)
     ax.axvline(0, color='black', lw=0.6)
     ax.set_xlim(*(numpy.array(ANALYSIS['plot_window']) * 1e3))
-    if ANALYSIS['bin_ylim'] is not None:
-        ax.set_ylim(*ANALYSIS['bin_ylim'])
+    lo, hi = min(mean.min(), 0), max(mean.max(), 0)
+    margin = 0.25 * (hi - lo) or 1
+    ax.set_ylim(lo - margin, hi + margin)
     ax.set_xlabel('Time [ms]')
     ax.set_ylabel('V [normalized]')
     ax.set_title(title)
@@ -1885,69 +1882,3 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     cbar.set_label('Center frequency (Hz)')
     cbar.outline.set_visible(False)
     return fig
-
-
-def shared_ylims(pad=0.05):
-    """y ranges that fit every TRF plot of every saved fit made with the current settings:
-    (summed, per_bin). `summed` covers each column's frequency-summed TRF, mean +- SEM across
-    subjects (the attend/ignore/mix and overt/masked overlays); `per_bin` covers each bin's mean
-    +- bin_error band, for every column and every attend - ignore effect. Kept in
-    RESULTS_DIR/ylims.json and worked out again only when the saved fits or settings change.
-    (None, None) when there are no saved fits. With results_mode 'remote'/'cluster' the ranges are read from
-    the cluster's ylims.json (worked out there at the end of each cluster run)."""
-    parameters = _setting('parameters')
-    settings = {name: ANALYSIS[name] for name in ('roi', 'plot_window', 'taper', 'taper_floor', 'end_taper', 'bin_error')}
-    defined_by = json.loads(json.dumps({'parameters': parameters, 'partitions': _partitions, 'settings': settings, 'pad': pad}))
-    if ANALYSIS['results_mode'] in ('remote', 'cluster'):
-        data = _remote_file('ylims.json')
-        if data is None:
-            return None, None
-        stored = json.loads(data)
-        if any(stored.get(k) != v for k, v in defined_by.items()):
-            print("The cluster worked out the shared y ranges with other settings (ROI, plot window, taper, "
-                  "bin error or fit parameters), so each plot uses its own range until the cluster runs again "
-                  "(submit_cluster_run()).")
-            return None, None
-        return tuple(stored['summed']), tuple(stored['per_bin'])
-
-    paths = []
-    for path in sorted(RESULTS_DIR.glob('trfs-*.pickle')):
-        spec_path = path.with_suffix('.json')
-        if spec_path.exists():
-            spec = json.loads(spec_path.read_text())
-            if spec.get('parameters') == parameters and spec.get('partitions') == _partitions:
-                paths.append(path)
-    if not paths:
-        return None, None
-
-    key = hashlib.sha1(json.dumps(
-        {'fits': [(p.name, p.stat().st_size) for p in paths], 'settings': settings, 'pad': pad},
-        sort_keys=True).encode()).hexdigest()
-    cache = RESULTS_DIR / 'ylims.json'
-    if cache.exists():
-        stored = json.loads(cache.read_text())
-        if stored.get('key') == key:
-            return tuple(stored['summed']), tuple(stored['per_bin'])
-
-    summed, per_bin = [0., 0.], [0., 0.]
-    for path in paths:
-        ds = load.unpickle(path)
-        columns = [k for k, v in ds.items() if isinstance(v, NDVar) and v.has_dim('frequency')]
-        for column in columns:
-            x = extract_trf(ds, column)['trf_sm'].get_data(('case', 'time')) * 1e3
-            mean, sem = x.mean(axis=0), x.std(axis=0, ddof=1) / numpy.sqrt(len(x))
-            summed = [min(summed[0], (mean - sem).min()), max(summed[1], (mean + sem).max())]
-            pairs = [(column, None)]
-            if f'bg_{column}' in columns:
-                pairs.append((column, f'bg_{column}'))
-            for col, subtract in pairs:
-                _, _, m, s = _bin_stats(ds, col, subtract)
-                per_bin = [min(per_bin[0], (m - s).min()), max(per_bin[1], (m + s).max())]
-
-    def padded(lo, hi):
-        margin = pad * (hi - lo)
-        return float(lo - margin), float(hi + margin)
-
-    summed, per_bin = padded(*summed), padded(*per_bin)
-    cache.write_text(json.dumps({'key': key, 'summed': summed, 'per_bin': per_bin, **defined_by}, indent=1))
-    return summed, per_bin
