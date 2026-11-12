@@ -27,14 +27,18 @@ disk. Nothing runs or is stored on your own computer, so any browser works
    8 GB, a few hours).
 3. **Open** `projects/def-ibruce/iggy/cocktail-cortical/analysis/` and any
    notebook, and pick the **Python (cocktail-cortical)** kernel.
-4. **Missing results:** the notebook stops and says which. Ask for them
-   from the notebook:
-   ```
-   submit_cluster_run('diotic')   # or submit_cluster_run() for every notebook
-   cluster_queue()                # pending/running jobs; empty = finished
-   ```
+4. **Run All.** The `check_results(...)` cell at the top checks that every
+   result the notebook reads is on the cluster. If any are missing it
+   submits a job for that notebook by itself and stops the notebook there.
    The job runs on its own, so the browser can be closed meanwhile; the
-   cluster emails when it ends. Then run the cell again.
+   cluster emails when it ends, and the `cluster_queue()` cell lists it
+   until then. Then Run All again.
+
+   It does not submit when a job for the notebook is already queued, or
+   when the last job already ran for the same results without saving them
+   (it points to that job's log, shown by the `cluster_log()` cell, instead).
+   After fixing such a failure, ask again with `submit_cluster_run('diotic')`
+   (or `submit_cluster_run()` for every notebook).
 
 Edits made in JupyterHub are in the cluster's copy of the repo and are
 what submitted jobs run. To keep the Mac and GitHub in sync, commit and
@@ -51,10 +55,11 @@ is needed.
    ```
    bash cluster/connect.sh
    ```
-2. **Run** any notebook. Missing results: as above,
-   `submit_cluster_run(...)` and `cluster_queue()`. From the Mac, the
-   cluster first updates its copy to GitHub's main branch, so commit and
-   push code changes first.
+2. **Run All** in any notebook, in VS Code or Jupyter. Missing results
+   are asked for by the `check_results(...)` cell, as above. From the Mac,
+   the cluster first updates its copy to GitHub's main branch, so the
+   check refuses to submit while `parameters.py` or `experiment.py` have
+   changes that are not pushed: commit and push them first.
 
 ### The cluster job
 

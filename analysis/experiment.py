@@ -70,6 +70,7 @@ What runs, top to bottom, the moment this file is imported
 """
 from eelbrain import Factor, NDVar, Var, configure, gui, load, plot, resample, save, table
 from eelbrain.pipeline import *
+import ast
 import hashlib
 import json
 import pickle
@@ -1284,14 +1285,27 @@ def _remote_file(name):
     return proc.stdout
 
 
+def _trfs_spec(model, epoch):
+    return {'model': model, 'epoch': epoch, 'parameters': _setting('parameters'), 'partitions': _partitions}
+
+
+def _test_spec(comparison, epoch, metric=None):
+    return {'comparison': comparison, 'epoch': epoch, 'parameters': _setting('parameters'), 'partitions': _partitions,
+            'pmin': ANALYSIS['pmin'], 'metric': _setting('metric', metric)}
+
+
+def _result_name(kind, spec):
+    key = hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
+    return f"{kind}-{spec['epoch']}-{key}.pickle"
+
+
 def _saved_result(kind, spec, compute):
     mode = ANALYSIS['results_mode']
     if mode is None:
         return compute()
     if mode not in ('remote', 'cluster', 'compute'):
         raise ValueError(f"results_mode={mode!r}; use 'remote', 'cluster' or 'compute'")
-    key = hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
-    name = f"{kind}-{spec['epoch']}-{key}.pickle"
+    name = _result_name(kind, spec)
     what = spec.get('model') or spec.get('comparison')
     if mode in ('remote', 'cluster'):
         if name not in _remote_results:
@@ -1299,9 +1313,7 @@ def _saved_result(kind, spec, compute):
             if data is None:
                 raise FileNotFoundError(
                     f"Not computed on the cluster yet: {kind} {what!r} ({spec['epoch']}).\n"
-                    f"Ask the cluster for it from this notebook with submit_cluster_run('<this notebook>') "
-                    f"(or submit_cluster_run() for every notebook), follow it with cluster_queue(), and run "
-                    f"this cell again once the job has finished.")
+                    f"Run the notebook's check_results() cell: it asks the cluster for whatever is missing.")
             _remote_results[name] = pickle.loads(data)
         return _remote_results[name]
 
@@ -1321,8 +1333,7 @@ def _saved_result(kind, spec, compute):
 def load_trfs_saved(model, epoch):
     "All subjects' TRFs for `model` in `epoch` (load_trfs('all', ...)), from the saved results"
     parameters = _setting('parameters')
-    spec = {'model': model, 'epoch': epoch, 'parameters': parameters, 'partitions': _partitions}
-    return _saved_result('trfs', spec, lambda: e.load_trfs('all', model, epoch=epoch, **parameters))
+    return _saved_result('trfs', _trfs_spec(model, epoch), lambda: e.load_trfs('all', model, epoch=epoch, **parameters))
 
 
 def submit_cluster_run(*notebooks):
@@ -1341,9 +1352,15 @@ def submit_cluster_run(*notebooks):
         raise ValueError(f"Unknown notebook(s) {sorted(unknown)}; choose from {NOTEBOOKS}")
     export = 'ALL' + (f",NOTEBOOKS={' '.join(notebooks)}" if notebooks else '')
     update = '' if _on_cluster() else 'git pull --no-rebase --no-edit origin main && '
+    # One notebook: the job is named after it, so check_results() can tell it is already queued
+    name = f"--job-name=cocktail-{notebooks[0]} " if len(notebooks) == 1 else ''
+    # A new request starts over: check_results() may ask again if this job fails too
+    requests = shlex.quote(f"{_setting('cluster_results')}/requests")
+    forget = ' '.join(f"{requests}/{nb}.json" for nb in notebooks) if notebooks else f"{requests}/*.json"
     command = (
+        f"rm -f {forget}; "
         f"cd {shlex.quote(_setting('cluster_repo'))} && {update}"
-        f"sbatch --account={shlex.quote(_setting('cluster_account'))} --export={shlex.quote(export)} "
+        f"sbatch --account={shlex.quote(_setting('cluster_account'))} {name}--export={shlex.quote(export)} "
         f"cluster/run_analysis.sbatch")
     proc = _cluster(f"bash -lc {shlex.quote(command)}")
     out = proc.stdout.decode() + proc.stderr.decode()
@@ -1365,17 +1382,154 @@ def cluster_queue():
 
 
 def cluster_log(job=None, lines=40):
-    "The last `lines` of a cluster job's log (cluster/runs/cocktail-results-JOB.out), the latest job's by default"
+    "The last `lines` of a cluster job's log (cluster/runs/cocktail-<name>-JOB.out), the latest job's by default"
     if ANALYSIS['results_mode'] == 'compute':
         print("Inside a cluster job: skipped.")
         return
-    pattern = f"cocktail-results-{int(job)}.out" if job else "cocktail-results-*.out"
+    pattern = f"cocktail-*-{int(job)}.out" if job else "cocktail-*.out"
     command = (
         f"cd {shlex.quote(_setting('cluster_repo'))}/cluster/runs && "
         f"f=$(ls -t {pattern} 2>/dev/null | head -1); "
         f"if [ -n \"$f\" ]; then echo \"== $f\"; tail -n {int(lines)} \"$f\"; else echo 'No job log found.'; fi")
     proc = _cluster(command)
     print(proc.stdout.decode() or proc.stderr.decode())
+
+
+# Checking a notebook's results before it runs
+
+class ResultsNotReady(Exception):
+    "Some results a notebook reads are not on the cluster yet; the message says what was done about it"
+
+
+def _cluster_listing():
+    "Names of the files in the cluster's results folder"
+    if _on_cluster():
+        folder = Path.home() / _setting('cluster_results')
+        return set(os.listdir(folder)) if folder.exists() else set()
+    proc = _cluster(f"ls -1 {shlex.quote(_setting('cluster_results'))} 2>/dev/null; true")
+    return set(proc.stdout.decode().split())
+
+
+def _notebook_results(notebook, namespace):
+    "File names of every saved result `notebook` reads, worked out from its own load_trfs_saved()/compute_*() calls"
+    names = set()
+    record = {  # same signatures and the same names as the real functions
+        'load_trfs_saved': lambda model, epoch: names.add(_result_name('trfs', _trfs_spec(model, epoch))),
+        'compute_unique_contribution': lambda full_model, predictor, epoch, roi=None, metric=None: names.add(
+            _result_name('test', _test_spec(f"{full_model} @ {predictor}", epoch, metric))),
+        'compute_direct_comparison': lambda model_a, model_b, epoch, roi=None, metric=None: names.add(
+            _result_name('test', _test_spec(f"{model_a} > {model_b}", epoch, metric))),
+    }
+    scope = {**namespace, **record}
+    nb = json.loads((Path(__file__).resolve().parent / f'{notebook}.ipynb').read_text())
+    for cell in nb['cells']:
+        if cell['cell_type'] != 'code':
+            continue
+        try:
+            tree = ast.parse(''.join(cell['source']))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in record:
+                eval(compile(ast.Expression(node), notebook, 'eval'), scope)
+    return names
+
+
+def _queued_jobs(notebook):
+    "(ID, state) of this user's cluster jobs computing `notebook`: its own, or one for every notebook"
+    proc = _cluster("bash -lc 'squeue -u $USER -h -o \"%i %200j %T\"'")
+    jobs = []
+    for line in proc.stdout.decode().splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[1] in (f'cocktail-{notebook}', 'cocktail-results'):
+            jobs.append((parts[0], parts[2].lower()))
+    return jobs
+
+
+def _request_record(notebook, write=None):
+    "The cluster's record of the last automatic request for `notebook` ({'job', 'missing'}), or write one"
+    rel = f"{_setting('cluster_results')}/requests/{notebook}.json"
+    if _on_cluster():
+        path = Path.home() / rel
+        if write is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(write))
+            return None
+        return json.loads(path.read_text()) if path.exists() else None
+    quoted = shlex.quote(rel)
+    if write is not None:
+        _cluster(f"mkdir -p \"$(dirname {quoted})\" && printf %s {shlex.quote(json.dumps(write))} > {quoted}")
+        return None
+    out = _cluster(f"cat {quoted} 2>/dev/null; true").stdout.decode().strip()
+    return json.loads(out) if out else None
+
+
+def _unpushed_changes():
+    "Changes to the code the cluster runs that are on this computer but not on GitHub, or None"
+    repo = Path(__file__).resolve().parent.parent
+    try:
+        status = subprocess.run(
+            ['git', '-C', str(repo), 'status', '--porcelain', '--', 'analysis/parameters.py', 'analysis/experiment.py',
+             'predictors'], capture_output=True, text=True, timeout=30)
+        ahead = subprocess.run(['git', '-C', str(repo), 'rev-list', '--count', '@{u}..HEAD'],
+                               capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    problems = []
+    if status.returncode == 0 and status.stdout.strip():
+        files = sorted({line[3:] for line in status.stdout.splitlines()})
+        problems.append(f"uncommitted changes to {', '.join(files)}")
+    if ahead.returncode == 0 and ahead.stdout.strip() not in ('', '0'):
+        problems.append(f"{ahead.stdout.strip()} commit(s) not pushed to GitHub")
+    return ' and '.join(problems) or None
+
+
+def check_results(notebook, namespace=None):
+    """Make sure every result `notebook` reads is on the cluster, asking the cluster for any that are not.
+
+    Meant as the first cell after the imports. All there: prints so and the
+    notebook carries on. Some missing: submits a job for this notebook and
+    stops it with ResultsNotReady, saying to run it again once the job has
+    finished. It does not submit when a job for this notebook is already
+    queued, when the last job already ran for the same results without
+    saving them (see its cluster_log), or, from the Mac, when parameters.py
+    or experiment.py have changes that are not on GitHub (the cluster would
+    compute with the old settings). Does nothing inside a cluster job."""
+    mode = ANALYSIS['results_mode']
+    if mode in (None, 'compute'):
+        return
+    if notebook not in NOTEBOOKS:
+        raise ValueError(f"Unknown notebook {notebook!r}; choose from {NOTEBOOKS}")
+    if namespace is None:
+        import parameters
+        namespace = vars(parameters)
+    needed = _notebook_results(notebook, namespace)
+    missing = sorted(needed - _cluster_listing())
+    if not missing:
+        print(f"All {len(needed)} results this notebook reads are on the cluster.")
+        return
+    status = f"{len(missing)} of {len(needed)} results this notebook reads are not on the cluster yet"
+    again = "Run the notebook again once it has finished (cluster_queue() lists it until then; the cluster also emails)."
+
+    jobs = _queued_jobs(notebook)
+    if jobs:
+        listed = ', '.join(f'{job} ({state})' for job, state in jobs)
+        raise ResultsNotReady(f"{status}; job {listed} is computing them. {again}")
+    record = _request_record(notebook)
+    if record and set(missing) <= set(record['missing']):
+        raise ResultsNotReady(
+            f"{status}, and job {record['job']} already ran for them without saving them, so nothing was "
+            f"submitted again. See what went wrong with cluster_log({record['job']}); once it is fixed (and "
+            f"pushed to GitHub), ask again with submit_cluster_run('{notebook}').")
+    if mode == 'remote':
+        unpushed = _unpushed_changes()
+        if unpushed:
+            raise ResultsNotReady(
+                f"{status}, but this computer has {unpushed}. The cluster runs the code on GitHub, so it would "
+                f"compute with the old settings. Commit and push (GitHub Desktop), then run this cell again.")
+    job = submit_cluster_run(notebook)
+    _request_record(notebook, write={'job': job, 'missing': missing})
+    raise ResultsNotReady(f"{status}, so job {job} was submitted to compute them. {again}")
 
 
 # Model comparisons
@@ -1390,9 +1544,7 @@ def _model_test(comparison, epoch, roi, metric):
         return e.load_model_test(
             comparison, **parameters, pmin=pmin, metric=metric, epoch=epoch, return_data=True)
 
-    spec = {'comparison': comparison, 'epoch': epoch, 'parameters': parameters, 'partitions': _partitions,
-            'pmin': pmin, 'metric': metric}
-    data, result = _saved_result('test', spec, compute)
+    data, result = _saved_result('test', _test_spec(comparison, epoch, metric), compute)
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
     diff[f'roi_{metric}'] = diff[metric].mean(sensor=roi)
     return data, diff, result

@@ -38,7 +38,7 @@ from experiment import (
     ATTEND, IGNORE, MIX, envelope, onset, overt_onset, masked_onset, level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
-    print_peak_table, plot_trf_bins, shared_ylims, submit_cluster_run, cluster_queue, cluster_log,
+    print_peak_table, plot_trf_bins, shared_ylims, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady,
 )
 import matplotlib.pyplot as plt
 import numpy
