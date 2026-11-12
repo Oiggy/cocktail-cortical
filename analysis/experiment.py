@@ -1331,7 +1331,11 @@ def submit_cluster_run(*notebooks):
     From the Mac, first brings the cluster's copy of the repo up to date
     with GitHub's main branch (so commit and push changes first). In the
     cluster's JupyterHub, runs that copy as it is, edits included. Then
-    submits cluster/run_analysis.sbatch for them. Returns the job ID."""
+    submits cluster/run_analysis.sbatch for them. Returns the job ID, or
+    None inside a cluster job, which never submits another."""
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: not submitting another one.")
+        return None
     unknown = set(notebooks) - set(NOTEBOOKS)
     if unknown:
         raise ValueError(f"Unknown notebook(s) {sorted(unknown)}; choose from {NOTEBOOKS}")
