@@ -1356,8 +1356,25 @@ def submit_cluster_run(*notebooks):
 
 
 def cluster_queue():
-    "Show this user's jobs on the cluster (pending or running); nothing listed = all finished"
+    "Show this user's jobs on the cluster (PD = waiting, R = running); none listed = all finished"
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
     proc = _cluster("bash -lc 'squeue -u $USER'")
+    print(proc.stdout.decode() or proc.stderr.decode())
+
+
+def cluster_log(job=None, lines=40):
+    "The last `lines` of a cluster job's log (cluster/runs/cocktail-results-JOB.out), the latest job's by default"
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
+    pattern = f"cocktail-results-{int(job)}.out" if job else "cocktail-results-*.out"
+    command = (
+        f"cd {shlex.quote(_setting('cluster_repo'))}/cluster/runs && "
+        f"f=$(ls -t {pattern} 2>/dev/null | head -1); "
+        f"if [ -n \"$f\" ]; then echo \"== $f\"; tail -n {int(lines)} \"$f\"; else echo 'No job log found.'; fi")
+    proc = _cluster(command)
     print(proc.stdout.decode() or proc.stderr.decode())
 
 
