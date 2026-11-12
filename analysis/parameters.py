@@ -160,7 +160,7 @@ TAPER_FLOOR = 0.1              # keep 10% of the TRF before that
 END_TAPER = 0.050              # fade out over the last 50 ms of the fit window
 PLOT_WINDOW = (-0.050, 0.390)  # x range of every STRF and TRF plot (TRFs end at ~390 ms with tstop 0.400)
 STRF_INTERPOLATION = 'bicubic' # display-only smoothing of STRF colours (None = raw sample blocks)
-BIN_ERROR = 'sd'               # band around each frequency bin's TRF: 'sd' or 'sem' across subjects
+BIN_ERROR = 'sem'              # band around each frequency bin's TRF: 'sem' or 'sd' across subjects
 
 configure_analysis(
     parameters=PARAMETERS, roi=ROI, metric=METRIC, pmin=PMIN, topo_args=TOPO_ARGS,

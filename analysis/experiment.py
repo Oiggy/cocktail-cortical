@@ -1176,7 +1176,7 @@ ANALYSIS = {
     'end_taper': 0.050,             # display taper: fade-out at the end of the fit window
     'plot_window': (-0.050, 0.550), # time range TRF plots show
     'results_mode': None,           # None: eelbrain cache only; 'remote'/'cluster'/'compute': saved results on the cluster (see _saved_result)
-    'bin_error': 'sd',              # band around each frequency bin in plot_trf_bins(): 'sd' or 'sem' across subjects
+    'bin_error': 'sem',             # band around each frequency bin in plot_trf_bins(): 'sem' or 'sd' across subjects
     'save_figures': True,           # topomaps also saved as PNG files under FIGURES_DIR
     'cluster_host': None,           # user@address of the cluster, e.g. 'iggy@narval.alliancecan.ca'
     'cluster_repo': None,           # the repo on the cluster, relative to the home folder there
@@ -1847,7 +1847,7 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     `error` ('sd' or 'sem' across subjects), the mean of the bins as a thick black line, and a key
     of the bins' centre frequencies on the right. `subtract` names a second column taken away
     first, e.g. the ignore column for an attention effect (attend - ignore). The y axis fits the
-    waveforms, so their peaks fill the plot; wide bands may run past its edges."""
+    waveforms with their whole bands, so nothing is cut off."""
     import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import BoundaryNorm, ListedColormap
@@ -1865,8 +1865,8 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     ax.axhline(0, color='black', lw=0.6)
     ax.axvline(0, color='black', lw=0.6)
     ax.set_xlim(*(numpy.array(ANALYSIS['plot_window']) * 1e3))
-    lo, hi = min(mean.min(), 0), max(mean.max(), 0)
-    margin = 0.25 * (hi - lo) or 1
+    lo, hi = min((mean - spread).min(), 0), max((mean + spread).max(), 0)
+    margin = 0.08 * (hi - lo) or 1
     ax.set_ylim(lo - margin, hi + margin)
     ax.set_xlabel('Time [ms]')
     ax.set_ylabel('V [normalized]')
