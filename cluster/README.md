@@ -1,39 +1,45 @@
 # Running the analysis on an Alliance cluster
 
-## Per-condition notebooks: saved results
+## Per-condition notebooks: notebook <-> cluster
 
 The per-condition notebooks in `analysis/` (`clean.ipynb`, `diotic.ipynb`,
 `diotic_overt_masked_onsets.ipynb`, ... with shared settings in
-`parameters.py`) do not use eelbrain's cache on the Mac. Every TRF fit and
-model test they need is saved on the cluster as a plain file in
-`dataset/cocktail/bids/derivatives/results/`, and the Mac downloads and
-reads those files. Reading them never checks file times and never asks
-questions.
+`parameters.py`) talk to the cluster directly. Every TRF fit and model
+test is computed and kept on the cluster, in
+`dataset/cocktail/bids/derivatives/results/`. A notebook on the Mac reads
+each result from there over SSH straight into memory: nothing is saved on
+the Mac, no local dataset is needed, and eelbrain's cache is never
+involved.
 
-1. **Compute** (on the cluster, from the repo root, after `git pull`):
+1. **Connect** (in a Mac terminal, from the repo root; one Duo login,
+   stays open 12 hours, run again after the laptop sleeps):
    ```
-   sbatch --account=def-ibruce cluster/run_analysis.sbatch
+   bash cluster/connect.sh
    ```
-   Runs preprocessing, then every notebook with `COCKTAIL_RESULTS=compute`,
-   saving each result as soon as it is done. Fits already in the cluster's
-   eelbrain cache are read from it, so the first run after the
-   `cortical_analysis.ipynb` jobs is quick. After a TIMEOUT, submit again:
-   saved results are read back in seconds. To run only some notebooks:
+2. **Run** any notebook. Results the cluster already has load in seconds.
+3. **Missing results:** the notebook stops and says which. Ask the
+   cluster for them from the notebook itself (commit and push code
+   changes first: the cluster updates to GitHub's main branch before
+   running):
    ```
-   sbatch --account=def-ibruce --export=ALL,NOTEBOOKS="clean diotic" cluster/run_analysis.sbatch
+   submit_cluster_run('diotic')   # or submit_cluster_run() for every notebook
+   cluster_queue()                # pending/running jobs; empty = finished
    ```
-2. **Fetch** (in a Mac terminal, from the repo root):
-   ```
-   bash cluster/fetch_results.sh
-   ```
-3. **Run** any notebook on the Mac. A result that was not fetched stops
-   with a message naming it. To fit one on the Mac instead, start Jupyter
-   with `COCKTAIL_RESULTS=compute jupyter lab`.
+   Then run the cell again. From a cluster terminal the same job is
+   `sbatch --account=def-ibruce cluster/run_analysis.sbatch`, with
+   `--export=ALL,NOTEBOOKS="clean diotic"` to limit it.
+
+The job saves each result as soon as it is done, so after a TIMEOUT just
+submit again: what is already saved is read back in seconds. Fits already
+in the cluster's eelbrain cache are read from it, so the first run after
+the `cortical_analysis.ipynb` jobs is quick.
 
 Each result's file name holds a hash of what defines it (model, condition,
 `PARAMETERS`, `PARTITIONS`, `METRIC`, `PMIN`), with the details in a
-matching `.json`. Changing any of those in `parameters.py` needs a new
-cluster run; ROI, peak windows and plot settings do not.
+matching `.json`. Rerunning with nothing changed reuses them; changing any
+of those in `parameters.py` makes the next cluster run compute new ones.
+ROI, peak windows and plot settings are applied in the notebook and need
+no new run.
 
 ## cortical_analysis.ipynb: eelbrain cache
 

@@ -3,8 +3,9 @@
 # on a compute node with COCKTAIL_RESULTS=compute: every TRF fit and model
 # test they need is fitted (or read from this cluster's eelbrain cache) and
 # saved as a plain pickle in dataset/cocktail/bids/derivatives/results.
-# Fetch those to the Mac with cluster/fetch_results.sh; the notebooks there
-# only read them.
+# The notebooks on the Mac read them from here over SSH; nothing is copied
+# to the Mac. A notebook can also submit this job itself:
+# submit_cluster_run('diotic').
 #
 # Submit from the repo root:
 #   sbatch --account=def-ibruce cluster/run_analysis.sbatch
@@ -44,6 +45,9 @@ for nb in $NOTEBOOKS; do
         --ExecutePreprocessor.timeout=-1 --ExecutePreprocessor.kernel_name=python3 \
         --output-dir "$REPO/cluster/runs" --output "${nb}_${SLURM_JOB_ID}.ipynb" || failed+=("$nb")
 done
+
+# Shared y ranges for the plots, worked out over every saved result (ylims.json)
+python -c "from parameters import *" || failed+=("shared y ranges")
 
 echo "=== saved results: $(ls "$RESULTS" 2>/dev/null | grep -c '\.pickle$')"
 if [ ${#failed[@]} -gt 0 ]; then

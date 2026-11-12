@@ -5,13 +5,21 @@ cortical_analysis.ipynb lives here, so each notebook (clean.ipynb,
 diotic.ipynb, diotic_overt_masked_onsets.ipynb, ...) can run on its own
 after a single `from parameters import *`.
 
-TRF fits and model tests are read from saved results
-(dataset/cocktail/bids/derivatives/results), not from eelbrain's cache.
-The cluster computes them (cluster/run_analysis.sbatch, which sets
-COCKTAIL_RESULTS=compute); on the Mac, fetch them with
-cluster/fetch_results.sh and the notebooks only read them.
+The only pathway is notebook <-> cluster. The cluster computes every TRF
+fit and model test and saves it there (cluster/run_analysis.sbatch, with
+COCKTAIL_RESULTS=compute). The notebooks on the Mac read each result
+straight from the cluster over SSH into memory (COCKTAIL_RESULTS=remote,
+the default): nothing is saved on the Mac, no local dataset is needed, and
+eelbrain's cache is never involved. Open the connection once per session
+with `bash cluster/connect.sh`; ask the cluster for missing results from a
+notebook with submit_cluster_run() and follow it with cluster_queue().
 """
 import os
+
+# 'remote': read results from the cluster (the Mac). 'compute': fit and
+# save whatever is missing (the cluster job sets this). Set before
+# experiment.py is imported: in 'remote' it builds no local pipeline.
+RESULTS_MODE = os.environ.setdefault('COCKTAIL_RESULTS', 'remote')
 
 from eelbrain import *
 from experiment import (
@@ -19,13 +27,20 @@ from experiment import (
     ATTEND, IGNORE, MIX, envelope, onset, overt_onset, masked_onset, level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
-    print_peak_table, plot_trf_bins, shared_ylims,
+    print_peak_table, plot_trf_bins, shared_ylims, submit_cluster_run, cluster_queue,
 )
 import matplotlib.pyplot as plt
 import numpy
 import seaborn as sns
 
-# Where to save plots: inside the BIDS dataset's derivatives.
+# The cluster: where results are computed and kept.
+CLUSTER_HOST = 'iggy@narval.alliancecan.ca'
+CLUSTER_ACCOUNT = 'def-ibruce'
+CLUSTER_REPO = 'projects/def-ibruce/iggy/cocktail-cortical'  # relative to the home folder there
+CLUSTER_RESULTS = 'projects/def-ibruce/iggy/dataset/cocktail/bids/derivatives/results'
+
+# Plots are shown in the notebook only; no image files are written.
+SAVE_FIGURES = False
 DST = FIGURES_DIR
 
 
@@ -102,7 +117,7 @@ PARAMETERS = {
 # Cross-validation folds for every TRF fit. Negative = the data are
 # concatenated, then split into this many folds.
 PARTITIONS = -5
-e = set_partitions(PARTITIONS)
+e = set_partitions(PARTITIONS, build=RESULTS_MODE == 'compute')
 
 # Fronto-central sensors averaged for every ROI summary.
 ROI = [
@@ -142,14 +157,12 @@ PLOT_WINDOW = (-0.050, 0.390)  # x range of every STRF and TRF plot (TRFs end at
 STRF_INTERPOLATION = 'bicubic' # display-only smoothing of STRF colours (None = raw sample blocks)
 BIN_ERROR = 'sd'               # band around each frequency bin's TRF: 'sd' or 'sem' across subjects
 
-# 'load': read saved results only (the Mac). 'compute': fit and save
-# whatever is missing (the cluster sets this).
-RESULTS_MODE = os.environ.get('COCKTAIL_RESULTS', 'load')
-
 configure_analysis(
     parameters=PARAMETERS, roi=ROI, metric=METRIC, pmin=PMIN, topo_args=TOPO_ARGS,
     taper=TAPER, taper_floor=TAPER_FLOOR, end_taper=END_TAPER, plot_window=PLOT_WINDOW,
-    results_mode=RESULTS_MODE, bin_error=BIN_ERROR,
+    results_mode=RESULTS_MODE, bin_error=BIN_ERROR, save_figures=SAVE_FIGURES,
+    cluster_host=CLUSTER_HOST, cluster_repo=CLUSTER_REPO, cluster_results=CLUSTER_RESULTS,
+    cluster_account=CLUSTER_ACCOUNT,
 )
 
 # Shared y ranges, so every TRF plot in every notebook can be compared

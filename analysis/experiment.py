@@ -72,6 +72,9 @@ from eelbrain import Factor, NDVar, Var, configure, gui, load, plot, resample, s
 from eelbrain.pipeline import *
 import hashlib
 import json
+import pickle
+import shlex
+import subprocess
 # Private import: this is the exception eelbrain itself raises when a saved
 # ICA file no longer matches the bad channels (or other raw settings) it was
 # fit against - see _ica_is_stale() below. Not part of eelbrain's public API,
@@ -920,11 +923,14 @@ class BinauralCocktail(Pipeline):
 
 
 # Creating the pipeline instance here means other scripts can just do
-# `from experiment import e` instead of repeating this setup.
-e = BinauralCocktail(DATA_ROOT)
+# `from experiment import e` instead of repeating this setup. Not when the
+# per-condition notebooks only read results from the cluster
+# (COCKTAIL_RESULTS=remote): they need no local dataset and must not
+# write anything there.
+e = None if os.environ.get('COCKTAIL_RESULTS') == 'remote' else BinauralCocktail(DATA_ROOT)
 
 
-def set_partitions(partitions):
+def set_partitions(partitions, build=True):
     """Rebuild `e` with a different number of boosting partitions.
 
     The boosting settings are a class attribute (`estimators`), read
@@ -941,12 +947,17 @@ def set_partitions(partitions):
         contiguous folds, the same convention as the -4 default.
         More folds: each fit trains on a larger share of the data, but
         fitting takes proportionally longer.
+    build
+        False: only record `partitions` for the saved results' keys,
+        without building a pipeline (reading results from the cluster).
     """
     global e, _partitions
+    _partitions = partitions
+    if not build:
+        return e
     estimators = {'boosting': Boosting(**{**BOOSTING_SETTINGS, 'partitions': partitions})}
     cls = type(BinauralCocktail.__name__, (BinauralCocktail,), {'estimators': estimators, '__module__': __name__})
     e = cls(DATA_ROOT)
-    _partitions = partitions
     return e
 
 
@@ -1162,9 +1173,14 @@ ANALYSIS = {
     'taper_floor': 0.1,             # display taper: share of the TRF kept before taper[0]
     'end_taper': 0.050,             # display taper: fade-out at the end of the fit window
     'plot_window': (-0.050, 0.550), # time range TRF plots show
-    'results_mode': None,           # None: eelbrain cache only; 'load'/'compute': saved results (see load_trfs_saved)
+    'results_mode': None,           # None: eelbrain cache only; 'remote'/'compute': saved results on the cluster (see _saved_result)
     'bin_error': 'sd',              # band around each frequency bin in plot_trf_bins(): 'sd' or 'sem' across subjects
     'bin_ylim': None,               # (bottom, top) shared by every plot_trf_bins() plot; None = each plot's own
+    'save_figures': True,           # topomaps also saved as PNG files under FIGURES_DIR
+    'cluster_host': None,           # user@address of the cluster, e.g. 'iggy@narval.alliancecan.ca'
+    'cluster_repo': None,           # the repo on the cluster, relative to the home folder there
+    'cluster_results': None,        # RESULTS_DIR on the cluster, relative to the home folder there
+    'cluster_account': None,        # SLURM account for submit_cluster_run()
 }
 
 
@@ -1214,33 +1230,72 @@ def level_onset(tier, role=MIX):
 
 # Saved results
 #
-# With results_mode configured, every TRF fit and model test is kept as a
-# plain pickle in RESULTS_DIR, named by a hash of everything that defines
-# it (model, epoch, fit parameters, partitions, test settings). Reading
-# one back never goes through eelbrain's cache, so it does not depend on
-# input file times and never asks questions. The cluster computes them
-# (results_mode 'compute'); the Mac only downloads and reads them
-# ('load', see cluster/fetch_results.sh).
+# With results_mode configured, every TRF fit and model test is kept on the
+# cluster as a plain pickle in RESULTS_DIR, named by a hash of everything
+# that defines it (model, epoch, fit parameters, partitions, test settings).
+# The cluster computes them (results_mode 'compute', run by
+# cluster/run_analysis.sbatch). The per-condition notebooks on the Mac
+# (results_mode 'remote') read each one straight from the cluster over SSH
+# into memory: nothing is written on the Mac, and eelbrain's cache is never
+# involved.
 
 RESULTS_DIR = Path(DATA_ROOT) / 'derivatives' / 'results'
+# The SSH connection cluster/connect.sh opens (one Duo login), reused by every request
+CONTROL_PATH = '~/.ssh/cocktail-%r@%h:%p'
+NOTEBOOKS = (
+    'clean', 'diotic', 'diotic_overt_masked_onsets', 'dichotic_left', 'dichotic_left_overt_masked_onsets',
+    'dichotic_right', 'dichotic_right_overt_masked_onsets', 'binaural', 'binaural_overt_masked_onsets',
+)
+_remote_results = {}  # results read from the cluster in this session, kept in memory only
+
+
+def _cluster(command):
+    "Run a shell command on the cluster over the open connection (stdout as bytes)"
+    host = _setting('cluster_host')
+    proc = subprocess.run(
+        ['ssh', '-o', 'BatchMode=yes', '-o', f'ControlPath={CONTROL_PATH}', host, command], capture_output=True)
+    if proc.returncode == 255:
+        raise ConnectionError(
+            f"No open connection to {host}. In a terminal, from the repo folder, run (one Duo login, "
+            f"stays open 12 hours):\n    bash cluster/connect.sh\nssh said: {proc.stderr.decode().strip()}")
+    return proc
+
+
+def _remote_file(name):
+    "Contents of the cluster's RESULTS_DIR/`name`, or None if it is not there"
+    path = shlex.quote(f"{_setting('cluster_results')}/{name}")
+    proc = _cluster(f"if [ -f {path} ]; then cat {path}; else exit 3; fi")
+    if proc.returncode == 3:
+        return None
+    if proc.returncode:
+        raise RuntimeError(f"Reading {name} on the cluster failed: {proc.stderr.decode().strip()}")
+    return proc.stdout
 
 
 def _saved_result(kind, spec, compute):
     mode = ANALYSIS['results_mode']
     if mode is None:
         return compute()
-    if mode not in ('load', 'compute'):
-        raise ValueError(f"results_mode={mode!r}; use 'load' or 'compute'")
+    if mode not in ('remote', 'compute'):
+        raise ValueError(f"results_mode={mode!r}; use 'remote' or 'compute'")
     key = hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
-    path = RESULTS_DIR / f"{kind}-{spec['epoch']}-{key}.pickle"
+    name = f"{kind}-{spec['epoch']}-{key}.pickle"
+    what = spec.get('model') or spec.get('comparison')
+    if mode == 'remote':
+        if name not in _remote_results:
+            data = _remote_file(name)
+            if data is None:
+                raise FileNotFoundError(
+                    f"Not computed on the cluster yet: {kind} {what!r} ({spec['epoch']}).\n"
+                    f"Ask the cluster for it from this notebook with submit_cluster_run('<this notebook>') "
+                    f"(or submit_cluster_run() for every notebook), follow it with cluster_queue(), and run "
+                    f"this cell again once the job has finished.")
+            _remote_results[name] = pickle.loads(data)
+        return _remote_results[name]
+
+    path = RESULTS_DIR / name
     if path.exists():
         return load.unpickle(path)
-    what = spec.get('model') or spec.get('comparison')
-    if mode == 'load':
-        raise FileNotFoundError(
-            f"No saved {kind} result for {what!r} ({spec['epoch']}): {path}\n"
-            f"Compute it on the cluster (sbatch cluster/run_analysis.sbatch), then fetch it with "
-            f"cluster/fetch_results.sh, or set COCKTAIL_RESULTS=compute to fit it here.")
     print(f"Computing {kind} {what!r} ({spec['epoch']}) -> {path.name}")
     out = compute()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1256,6 +1311,36 @@ def load_trfs_saved(model, epoch):
     parameters = _setting('parameters')
     spec = {'model': model, 'epoch': epoch, 'parameters': parameters, 'partitions': _partitions}
     return _saved_result('trfs', spec, lambda: e.load_trfs('all', model, epoch=epoch, **parameters))
+
+
+def submit_cluster_run(*notebooks):
+    """Ask the cluster to compute what these notebooks need (every notebook if none are named).
+
+    Brings the cluster's copy of the repo up to date with GitHub's main
+    branch (so commit and push changes first), then submits
+    cluster/run_analysis.sbatch for them. Returns the job ID."""
+    unknown = set(notebooks) - set(NOTEBOOKS)
+    if unknown:
+        raise ValueError(f"Unknown notebook(s) {sorted(unknown)}; choose from {NOTEBOOKS}")
+    export = 'ALL' + (f",NOTEBOOKS={' '.join(notebooks)}" if notebooks else '')
+    command = (
+        f"cd {shlex.quote(_setting('cluster_repo'))} && git pull --no-rebase --no-edit origin main && "
+        f"sbatch --account={shlex.quote(_setting('cluster_account'))} --export={shlex.quote(export)} "
+        f"cluster/run_analysis.sbatch")
+    proc = _cluster(f"bash -lc {shlex.quote(command)}")
+    out = proc.stdout.decode() + proc.stderr.decode()
+    job = re.search(r'Submitted batch job (\d+)', out)
+    if proc.returncode or not job:
+        raise RuntimeError(f"Submitting on the cluster failed:\n{out}")
+    print(f"Submitted job {job[1]} for {', '.join(notebooks) or 'every notebook'}. "
+          f"Follow it with cluster_queue(); the cluster also emails when it ends.")
+    return job[1]
+
+
+def cluster_queue():
+    "Show this user's jobs on the cluster (pending or running); nothing listed = all finished"
+    proc = _cluster("bash -lc 'squeue -u $USER'")
+    print(proc.stdout.decode() or proc.stderr.decode())
 
 
 # Model comparisons
@@ -1293,7 +1378,8 @@ def show_topomap_trio(data, diff, result, label, epoch, predictor, metric=None):
     metric = _setting('metric', metric)
     pmin = ANALYSIS['pmin']
     pct = metric == 'ev'
-    topo_kwargs = dict(pct=pct, condition=epoch, predictor=predictor, colorbar_side='left', colorbar_label=False, **ANALYSIS['topo_args'])
+    topo_kwargs = dict(pct=pct, condition=epoch, predictor=predictor, colorbar_side='left', colorbar_label=False,
+                       save=ANALYSIS['save_figures'], **ANALYSIS['topo_args'])
     topomap_with_colorbar(metric, data.sub("model == 'test'"), label=f'{label}: test', **topo_kwargs)
     topomap_with_colorbar(metric, data.sub("model == 'baseline'"), label=f'{label}: baseline', **topo_kwargs)
     # The third panel shows the mean r/ev difference (the actual unique
@@ -1538,8 +1624,23 @@ def shared_ylims(pad=0.05):
     subjects (the attend/ignore/mix and overt/masked overlays); `per_bin` covers each bin's mean
     +- bin_error band, for every column and every attend - ignore effect. Kept in
     RESULTS_DIR/ylims.json and worked out again only when the saved fits or settings change.
-    (None, None) when there are no saved fits."""
+    (None, None) when there are no saved fits. With results_mode 'remote' the ranges are read from
+    the cluster's ylims.json (worked out there at the end of each cluster run)."""
     parameters = _setting('parameters')
+    settings = {name: ANALYSIS[name] for name in ('roi', 'plot_window', 'taper', 'taper_floor', 'end_taper', 'bin_error')}
+    defined_by = json.loads(json.dumps({'parameters': parameters, 'partitions': _partitions, 'settings': settings, 'pad': pad}))
+    if ANALYSIS['results_mode'] == 'remote':
+        data = _remote_file('ylims.json')
+        if data is None:
+            return None, None
+        stored = json.loads(data)
+        if any(stored.get(k) != v for k, v in defined_by.items()):
+            print("The cluster worked out the shared y ranges with other settings (ROI, plot window, taper, "
+                  "bin error or fit parameters), so each plot uses its own range until the cluster runs again "
+                  "(submit_cluster_run()).")
+            return None, None
+        return tuple(stored['summed']), tuple(stored['per_bin'])
+
     paths = []
     for path in sorted(RESULTS_DIR.glob('trfs-*.pickle')):
         spec_path = path.with_suffix('.json')
@@ -1550,7 +1651,6 @@ def shared_ylims(pad=0.05):
     if not paths:
         return None, None
 
-    settings = {name: ANALYSIS[name] for name in ('roi', 'plot_window', 'taper', 'taper_floor', 'end_taper', 'bin_error')}
     key = hashlib.sha1(json.dumps(
         {'fits': [(p.name, p.stat().st_size) for p in paths], 'settings': settings, 'pad': pad},
         sort_keys=True).encode()).hexdigest()
@@ -1580,5 +1680,5 @@ def shared_ylims(pad=0.05):
         return float(lo - margin), float(hi + margin)
 
     summed, per_bin = padded(*summed), padded(*per_bin)
-    cache.write_text(json.dumps({'key': key, 'summed': summed, 'per_bin': per_bin}, indent=1))
+    cache.write_text(json.dumps({'key': key, 'summed': summed, 'per_bin': per_bin, **defined_by}, indent=1))
     return summed, per_bin
