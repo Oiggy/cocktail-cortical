@@ -19,7 +19,7 @@ from experiment import (
     ATTEND, IGNORE, MIX, envelope, onset, overt_onset, masked_onset, level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
-    print_peak_table, plot_trf_bins,
+    print_peak_table, plot_trf_bins, shared_ylims,
 )
 import matplotlib.pyplot as plt
 import numpy
@@ -151,3 +151,17 @@ configure_analysis(
     taper=TAPER, taper_floor=TAPER_FLOOR, end_taper=END_TAPER, plot_window=PLOT_WINDOW,
     results_mode=RESULTS_MODE, bin_error=BIN_ERROR,
 )
+
+# Shared y ranges, so every TRF plot in every notebook can be compared
+# directly. None = the widest range across all saved fits (worked out by
+# shared_ylims()); or set a fixed (bottom, top). Two ranges, because the
+# overlays show the frequency-summed TRF, about 8 times a single bin: on
+# one range the per-bin plots would shrink to an eighth of their height.
+TRF_YLIM = None      # attend/ignore/mix and overt/masked overlays (frequency-summed TRFs)
+TRF_BIN_YLIM = None  # per-bin TRF and attention-effect plots
+
+_auto_ylim, _auto_bin_ylim = shared_ylims()
+TRF_YLIM = TRF_YLIM or _auto_ylim
+TRF_BIN_YLIM = TRF_BIN_YLIM or _auto_bin_ylim
+TRF_YLIM_ARGS = dict(bottom=TRF_YLIM[0], top=TRF_YLIM[1]) if TRF_YLIM else {}
+configure_analysis(bin_ylim=TRF_BIN_YLIM)

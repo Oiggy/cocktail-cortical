@@ -1164,6 +1164,7 @@ ANALYSIS = {
     'plot_window': (-0.050, 0.550), # time range TRF plots show
     'results_mode': None,           # None: eelbrain cache only; 'load'/'compute': saved results (see load_trfs_saved)
     'bin_error': 'sd',              # band around each frequency bin in plot_trf_bins(): 'sd' or 'sem' across subjects
+    'bin_ylim': None,               # (bottom, top) shared by every plot_trf_bins() plot; None = each plot's own
 }
 
 
@@ -1476,27 +1477,32 @@ def bin_trfs(data, column, subtract=None, roi=None):
     return resample(trf, 512).sub(time=ANALYSIS['plot_window'])
 
 
-def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
-    """TRF of each frequency bin in its own colour (lowest dark, highest yellow) with a band of
-    `error` ('sd' or 'sem' across subjects), the mean of the bins as a thick black line, and a key
-    of the bins' centre frequencies on the right. `subtract` names a second column taken away
-    first, e.g. the ignore column for an attention effect (attend - ignore)."""
-    import matplotlib.pyplot as plt
-    from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import BoundaryNorm, ListedColormap
-
+def _bin_stats(data, column, subtract=None, roi=None, error=None):
+    "times (ms), centre frequencies, and each bin's mean and `error` band across subjects (x 1e3, as plotted)"
     error = _setting('bin_error', error)
     trf = bin_trfs(data, column, subtract, roi) * 1e3
     x = trf.get_data(('case', 'frequency', 'time'))
-    times = trf.time.times * 1e3
-    freqs = trf.frequency.values
-    n = len(freqs)
     mean = x.mean(axis=0)
     spread = x.std(axis=0, ddof=1)
     if error == 'sem':
         spread = spread / numpy.sqrt(len(x))
     elif error != 'sd':
         raise ValueError(f"error={error!r}; use 'sd' or 'sem'")
+    return trf.time.times * 1e3, trf.frequency.values, mean, spread
+
+
+def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
+    """TRF of each frequency bin in its own colour (lowest dark, highest yellow) with a band of
+    `error` ('sd' or 'sem' across subjects), the mean of the bins as a thick black line, and a key
+    of the bins' centre frequencies on the right. `subtract` names a second column taken away
+    first, e.g. the ignore column for an attention effect (attend - ignore). The y range is the
+    configured `bin_ylim`, shared by every per-bin plot."""
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+
+    times, freqs, mean, spread = _bin_stats(data, column, subtract, roi, error)
+    n = len(freqs)
     colors = plt.colormaps['viridis'](numpy.linspace(0, 1, n))
 
     fig, ax = plt.subplots(figsize=(5.5, 3))
@@ -1508,6 +1514,8 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     ax.axhline(0, color='black', lw=0.6)
     ax.axvline(0, color='black', lw=0.6)
     ax.set_xlim(*(numpy.array(ANALYSIS['plot_window']) * 1e3))
+    if ANALYSIS['bin_ylim'] is not None:
+        ax.set_ylim(*ANALYSIS['bin_ylim'])
     ax.set_xlabel('Time [ms]')
     ax.set_ylabel('V [normalized]')
     ax.set_title(title)
@@ -1522,3 +1530,55 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     cbar.set_label('Center frequency (Hz)')
     cbar.outline.set_visible(False)
     return fig
+
+
+def shared_ylims(pad=0.05):
+    """y ranges that fit every TRF plot of every saved fit made with the current settings:
+    (summed, per_bin). `summed` covers each column's frequency-summed TRF, mean +- SEM across
+    subjects (the attend/ignore/mix and overt/masked overlays); `per_bin` covers each bin's mean
+    +- bin_error band, for every column and every attend - ignore effect. Kept in
+    RESULTS_DIR/ylims.json and worked out again only when the saved fits or settings change.
+    (None, None) when there are no saved fits."""
+    parameters = _setting('parameters')
+    paths = []
+    for path in sorted(RESULTS_DIR.glob('trfs-*.pickle')):
+        spec_path = path.with_suffix('.json')
+        if spec_path.exists():
+            spec = json.loads(spec_path.read_text())
+            if spec.get('parameters') == parameters and spec.get('partitions') == _partitions:
+                paths.append(path)
+    if not paths:
+        return None, None
+
+    settings = {name: ANALYSIS[name] for name in ('roi', 'plot_window', 'taper', 'taper_floor', 'end_taper', 'bin_error')}
+    key = hashlib.sha1(json.dumps(
+        {'fits': [(p.name, p.stat().st_size) for p in paths], 'settings': settings, 'pad': pad},
+        sort_keys=True).encode()).hexdigest()
+    cache = RESULTS_DIR / 'ylims.json'
+    if cache.exists():
+        stored = json.loads(cache.read_text())
+        if stored.get('key') == key:
+            return tuple(stored['summed']), tuple(stored['per_bin'])
+
+    summed, per_bin = [0., 0.], [0., 0.]
+    for path in paths:
+        ds = load.unpickle(path)
+        columns = [k for k, v in ds.items() if isinstance(v, NDVar) and v.has_dim('frequency')]
+        for column in columns:
+            x = extract_trf(ds, column)['trf_sm'].get_data(('case', 'time')) * 1e3
+            mean, sem = x.mean(axis=0), x.std(axis=0, ddof=1) / numpy.sqrt(len(x))
+            summed = [min(summed[0], (mean - sem).min()), max(summed[1], (mean + sem).max())]
+            pairs = [(column, None)]
+            if f'bg_{column}' in columns:
+                pairs.append((column, f'bg_{column}'))
+            for col, subtract in pairs:
+                _, _, m, s = _bin_stats(ds, col, subtract)
+                per_bin = [min(per_bin[0], (m - s).min()), max(per_bin[1], (m + s).max())]
+
+    def padded(lo, hi):
+        margin = pad * (hi - lo)
+        return float(lo - margin), float(hi + margin)
+
+    summed, per_bin = padded(*summed), padded(*per_bin)
+    cache.write_text(json.dumps({'key': key, 'summed': summed, 'per_bin': per_bin}, indent=1))
+    return summed, per_bin
