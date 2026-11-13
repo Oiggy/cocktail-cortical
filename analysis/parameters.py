@@ -38,7 +38,7 @@ from experiment import (
     ATTEND, IGNORE, MIX, envelope, onset, overt_onset, masked_onset, level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
-    print_peak_table, plot_trf_bins, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError,
+    print_peak_table, plot_trf_bins, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError, find_roi,
 )
 import matplotlib.pyplot as plt
 import numpy
@@ -101,7 +101,30 @@ LEVEL_AWARE = (
 
 # Fit metric: 'r' (Pearson correlation) or 'ev' (proportion of variance explained)
 METRIC = 'r'
-PMIN = 0.05
+
+# Model comparisons: permutation tests with threshold-free cluster
+# enhancement (TFCE), as in Brodbeck et al. 2020, one-tailed, significant
+# at p <= ALPHA. With 13 subjects there are only 2**13 sign flips, so every
+# one of them is used (8191), an exact test; SAMPLES caps it otherwise.
+PMIN = 'tfce'
+ALPHA = 0.05
+SAMPLES = 10000
+
+# Where each notebook's model comparisons are tested: 'whole_scalp' (all
+# sensors) or 'roi' (the sensors the clean notebook found, read from
+# roi.txt on the cluster; see find_roi() in experiment.py). As in Brodbeck
+# et al. 2020: clean speech over the whole scalp, then the ROI it defines.
+TEST_REGION = {
+    'clean': 'whole_scalp',
+    'diotic': 'roi',
+    'diotic_overt_masked_onsets': 'roi',
+    'dichotic_left': 'roi',
+    'dichotic_left_overt_masked_onsets': 'roi',
+    'dichotic_right': 'roi',
+    'dichotic_right_overt_masked_onsets': 'roi',
+    'binaural': 'roi',
+    'binaural_overt_masked_onsets': 'roi',
+}
 
 # ev is a tiny fraction of variance and needs a fixed, narrow colour
 # scale; r reads fine with an automatic one.
@@ -124,8 +147,14 @@ PARAMETERS = {
 PARTITIONS = -5
 e = set_partitions(PARTITIONS, build=RESULTS_MODE == 'compute')
 
-# Fronto-central sensors averaged for every ROI summary.
-ROI = [
+# The ROI averaged for every ROI summary (STRFs, TRF waveforms, peaks, the
+# ROI t-tests) and used for the 'roi' tests is found from clean speech:
+# find_roi() in the clean notebook, read from roi.txt by every other
+# notebook's check_results() cell. ROI_FALLBACK, the earlier hand-picked
+# fronto-central sensors, is used only if clean speech shows no significant
+# sensor at all (roi.txt says so when it happens).
+ROI = None
+ROI_FALLBACK = [
     'AF3', 'F1', 'F3', 'F5',
     'FC5', 'FC3', 'FC1',
     'C1', 'C3', 'C5',
@@ -163,7 +192,8 @@ STRF_INTERPOLATION = 'bicubic' # display-only smoothing of STRF colours (None = 
 BIN_ERROR = 'sem'              # band around each frequency bin's TRF: 'sem' or 'sd' across subjects
 
 configure_analysis(
-    parameters=PARAMETERS, roi=ROI, metric=METRIC, pmin=PMIN, topo_args=TOPO_ARGS,
+    parameters=PARAMETERS, roi=ROI, metric=METRIC, pmin=PMIN, alpha=ALPHA, samples=SAMPLES,
+    test_regions=TEST_REGION, roi_fallback=ROI_FALLBACK, topo_args=TOPO_ARGS,
     taper=TAPER, taper_floor=TAPER_FLOOR, end_taper=END_TAPER, plot_window=PLOT_WINDOW,
     results_mode=RESULTS_MODE, bin_error=BIN_ERROR, save_figures=SAVE_FIGURES,
     cluster_host=CLUSTER_HOST, cluster_repo=CLUSTER_REPO, cluster_results=CLUSTER_RESULTS,

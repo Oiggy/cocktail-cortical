@@ -68,7 +68,7 @@ What runs, top to bottom, the moment this file is imported
   ready-to-use pipeline object, `e`, that every analysis script imports.
   This is the only line that produces something other scripts use.
 """
-from eelbrain import Factor, NDVar, Var, configure, gui, load, plot, resample, save, table
+from eelbrain import Factor, NDVar, Var, configure, gui, load, plot, resample, save, table, testnd
 from eelbrain.pipeline import *
 import ast
 import hashlib
@@ -1169,7 +1169,12 @@ ANALYSIS = {
     'parameters': None,             # keyword arguments for load_trfs()/load_model_test()
     'roi': None,                    # sensors averaged over for ROI summaries
     'metric': 'r',                  # model-fit metric: 'r' or 'ev'
-    'pmin': 0.05,                   # cluster-forming threshold for model tests
+    'pmin': 0.05,                   # cluster-forming threshold for model tests, or 'tfce'
+    'alpha': 0.05,                  # significance level for masks and the ROI
+    'samples': 10000,               # permutations for ROI tests (all possible ones when there are fewer)
+    'test_region': None,            # None: as eelbrain tests; 'whole_scalp' or 'roi' (set by check_results)
+    'test_regions': None,           # {notebook: 'whole_scalp' | 'roi'}
+    'roi_fallback': None,           # sensors used if clean speech shows no significant sensor at all
     'topo_args': {},                # extra arguments for topomap_with_colorbar()
     'taper': (0.003, 0.033),        # display taper: floor up to taper[0], full strength from taper[1]
     'taper_floor': 0.1,             # display taper: share of the TRF kept before taper[0]
@@ -1458,13 +1463,14 @@ def _notebook_results(notebook, namespace):
     return names
 
 
-def _queued_jobs(notebook):
-    "(ID, state) of this user's cluster jobs computing `notebook`: its own, or one for every notebook"
+def _queued_jobs(*notebooks):
+    "(ID, state) of this user's cluster jobs computing any of `notebooks`: their own, or one for several notebooks"
+    names = {f'cocktail-{notebook}' for notebook in notebooks} | {'cocktail-results'}
     proc = _cluster("bash -lc 'squeue -u $USER -h -o \"%i %200j %T\"'")
     jobs = []
     for line in proc.stdout.decode().splitlines():
         parts = line.split()
-        if len(parts) == 3 and parts[1] in (f'cocktail-{notebook}', 'cocktail-results'):
+        if len(parts) == 3 and parts[1] in names:
             jobs.append((parts[0], parts[2].lower()))
     return jobs
 
@@ -1516,6 +1522,88 @@ def _unpushed_changes():
     return ' and '.join(problems) or None
 
 
+# The ROI: an independent functional localizer from clean speech
+#
+# As in Brodbeck et al. 2020 (PLOS Biology), the clean-speech model
+# comparisons, tested over the whole scalp, decide where the two-talker
+# conditions are analyzed: the ROI is every sensor where both onsets and the
+# envelope significantly improve the prediction of held-out EEG (TFCE,
+# one-tailed), a conjunction, so both maps define it together. Clean speech
+# is a separate condition from the two-talker data the ROI is then used for,
+# so choosing it there cannot bias those tests (an independent localizer;
+# Luck & Gaspelin 2017, Psychophysiology). It is written to RESULTS_DIR/roi.txt.
+
+ROI_FILE = 'roi.txt'
+ROI_CITATIONS = (
+    "Brodbeck, Jiao, Hong & Simon (2020) PLOS Biology 18(10): e3000883 (localizer from clean speech)",
+    "Luck & Gaspelin (2017) Psychophysiology 54(1): 146-157 (independent localizer against circular analysis)",
+    "Smith & Nichols (2009) NeuroImage 44(1): 83-98 (TFCE); Mensen & Khatami (2013) NeuroImage 67: 111-118 (TFCE for EEG)",
+)
+
+
+def find_roi(full_model, predictors, epoch='clean'):
+    """The ROI from clean speech (see above): sensors where every one of `predictors` uniquely improves
+    `full_model` (TFCE, whole scalp, p <= alpha). If no sensor qualifies for every predictor, the
+    sensors significant for any; if none at all, the a priori ROI_FALLBACK. Writes roi.txt inside a
+    cluster job, sets the ROI for this notebook and returns it."""
+    alpha = ANALYSIS['alpha']
+    order, significant = None, {}
+    for predictor in predictors:
+        _, _, result = compute_unique_contribution(full_model, predictor, epoch)
+        p = result.p
+        order = list(p.sensor.names)
+        significant[predictor] = {name for name, value in zip(p.sensor.names, p.x) if value <= alpha}
+    every = [name for name in order if all(name in s for s in significant.values())]
+    some = [name for name in order if any(name in s for s in significant.values())]
+    if every:
+        roi, rule = every, "conjunction: significant for every predictor"
+    elif some:
+        roi, rule = some, "union: no sensor was significant for every predictor, so those significant for any"
+    else:
+        roi, rule = list(_setting('roi_fallback')), "fallback: no significant sensor in clean speech, so ROI_FALLBACK"
+
+    counts = ', '.join(f"{predictor}: {len(s)}" for predictor, s in significant.items())
+    text = '\n'.join([
+        "# ROI for the two-talker notebooks: an independent functional localizer from clean speech.",
+        f"# Sensors where {' and '.join(predictors)} uniquely improve the prediction of held-out EEG",
+        f"# ({epoch}; TFCE over the whole scalp, one-tailed, p <= {alpha}).",
+        f"# Rule: {rule}. Significant sensors per predictor: {counts}.",
+        f"# Made {time.strftime('%Y-%m-%d %H:%M')} with fit parameters {json.dumps(_setting('parameters'), sort_keys=True)}.",
+        *[f"# Method: {citation}" for citation in ROI_CITATIONS],
+        *roi, ''])
+    if ANALYSIS['results_mode'] == 'compute':
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        (RESULTS_DIR / ROI_FILE).write_text(text)
+    configure_analysis(roi=roi)
+    print(f"ROI ({len(roi)} sensors; {rule}): {', '.join(roi)}")
+    return roi
+
+
+def _read_roi():
+    "The sensors in roi.txt (written by the clean notebook), or None if it does not exist yet"
+    if ANALYSIS['results_mode'] == 'compute':
+        path = RESULTS_DIR / ROI_FILE
+        text = path.read_text() if path.exists() else None
+    else:
+        data = _remote_file(ROI_FILE)
+        text = data.decode() if data is not None else None
+    if text is None:
+        return None
+    return [line.strip() for line in text.splitlines() if line.strip() and not line.startswith('#')]
+
+
+def _use_roi(notebook, required=False):
+    roi = _read_roi()
+    if not roi:
+        if required:
+            raise RuntimeError(f"No {ROI_FILE} yet: the clean notebook has to run before {notebook!r} "
+                               f"(submit_cluster_run('clean', '{notebook}') runs both, in that order).")
+        return None
+    configure_analysis(roi=roi)
+    print(f"ROI from the clean notebook ({len(roi)} sensors): {', '.join(roi)}")
+    return roi
+
+
 def check_results(notebook, namespace=None):
     """Make sure every result `notebook` reads is on the cluster, computing any that are not.
 
@@ -1530,24 +1618,43 @@ def check_results(notebook, namespace=None):
     its log; no new job is submitted for the same results until
     submit_cluster_run() is called by hand), or, from the Mac, parameters.py
     or experiment.py have changes that are not on GitHub (the cluster runs
-    the code on GitHub, so it would compute with the old settings). Does
-    nothing inside a cluster job."""
+    the code on GitHub, so it would compute with the old settings).
+
+    It also sets where this notebook's model comparisons are tested
+    (TEST_REGION in parameters.py): the whole scalp, or the ROI the clean
+    notebook found (roi.txt on the cluster). A notebook that needs the ROI
+    before it exists has the cluster run the clean notebook first, in the
+    same job. Inside a cluster job it only sets the test region and ROI."""
     mode = ANALYSIS['results_mode']
-    if mode in (None, 'compute'):
+    if mode is None:
         return
     if notebook not in NOTEBOOKS:
         raise ValueError(f"Unknown notebook {notebook!r}; choose from {NOTEBOOKS}")
+    region = (ANALYSIS['test_regions'] or {}).get(notebook, 'whole_scalp')
+    if region not in ('whole_scalp', 'roi'):
+        raise ValueError(f"TEST_REGION[{notebook!r}] = {region!r}; use 'whole_scalp' or 'roi'")
+    configure_analysis(test_region=region)
+    if mode == 'compute':
+        if region == 'roi':
+            _use_roi(notebook, required=True)
+        return
+
     if namespace is None:
         import parameters
         namespace = vars(parameters)
     needed = _notebook_results(notebook, namespace)
+    if region == 'roi':
+        needed.add(ROI_FILE)  # from the clean notebook
     missing = sorted(needed - _cluster_listing())
     if not missing:
+        if region == 'roi':
+            _use_roi(notebook)
         print(f"All {len(needed)} results this notebook reads are on the cluster.")
         return
     status = f"{len(missing)} of {len(needed)} results this notebook reads are not on the cluster yet"
+    run = ('clean', notebook) if ROI_FILE in missing and notebook != 'clean' else (notebook,)
 
-    jobs = _queued_jobs(notebook)
+    jobs = _queued_jobs(*run)
     if jobs:
         job = jobs[0][0]
         print(f"{status}; job {job} is already computing them.")
@@ -1562,26 +1669,29 @@ def check_results(notebook, namespace=None):
                     f"{status}, but this computer has {unpushed}. The cluster runs the code on GitHub, so it "
                     f"would compute with the old settings. Commit and push them (GitHub Desktop), then run the "
                     f"notebook again.")
-        print(f"{status}; asking the cluster for them.")
-        job = submit_cluster_run(notebook)
+        first = " (the clean notebook first, for the ROI)" if len(run) > 1 else ""
+        print(f"{status}; asking the cluster for them{first}.")
+        job = submit_cluster_run(*run)
         _request_record(notebook, write={'job': job, 'missing': missing})
 
-    _wait_for(notebook, job)
+    _wait_for(run, job)
     still = sorted(set(missing) - _cluster_listing())
     if still:
         _job_failed(notebook, job, still, len(needed))
     _forget_request(notebook)
+    if region == 'roi':
+        _use_roi(notebook)
     print(f"Job {job} is done: all {len(needed)} results are on the cluster. Carrying on with the notebook.")
 
 
-def _wait_for(notebook, job, poll=60):
-    "Wait until no cluster job for `notebook` is waiting or running, printing a line whenever its state changes"
+def _wait_for(notebooks, job, poll=60):
+    "Wait until no cluster job for `notebooks` is waiting or running, printing a line whenever its state changes"
     started, last = time.time(), None
     print(f"Waiting for job {job} (checked every minute; the cluster also emails when it ends). "
           f"Interrupting only stops the waiting, not the job.")
     try:
         while True:
-            jobs = _queued_jobs(notebook)
+            jobs = _queued_jobs(*notebooks)
             if not jobs:
                 return
             state = ', '.join(f'{j} {s}' for j, s in jobs)
@@ -1613,7 +1723,7 @@ def _job_failed(notebook, job, missing, n_needed, earlier=False):
 # Model comparisons
 
 def _model_test(comparison, epoch, roi, metric):
-    roi = _setting('roi', roi)
+    roi = roi if roi is not None else ANALYSIS['roi']
     metric = _setting('metric', metric)
     parameters = _setting('parameters')
     pmin = ANALYSIS['pmin']
@@ -1623,9 +1733,30 @@ def _model_test(comparison, epoch, roi, metric):
             comparison, **parameters, pmin=pmin, metric=metric, epoch=epoch, return_data=True)
 
     data, result = _saved_result('test', _test_spec(comparison, epoch, metric), compute)
+    if ANALYSIS['test_region'] == 'roi':
+        if not roi:
+            raise RuntimeError("No ROI yet: run the notebook's check_results() cell first (it reads the ROI the "
+                               "clean notebook found).")
+        result = _roi_test(data, metric, roi)
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
-    diff[f'roi_{metric}'] = diff[metric].mean(sensor=roi)
+    if roi:
+        diff[f'roi_{metric}'] = diff[metric].mean(sensor=roi)
     return data, diff, result
+
+
+def _roi_test(data, metric, roi):
+    "The same one-tailed test (test > baseline), on the ROI's sensors only, with TFCE"
+    in_roi = data.copy()
+    in_roi[metric] = data[metric].sub(sensor=roi)
+    return testnd.TTestRelated(
+        metric, 'model', 'test', 'baseline', 'subject', data=in_roi, tail=1, tfce=True, samples=ANALYSIS['samples'])
+
+
+def _not_significant(result, sensor):
+    "True for each sensor of `sensor` that is not significant in `result` (also those the test did not include)"
+    p = result.p
+    significant = {name for name, value in zip(p.sensor.names, p.x) if value <= ANALYSIS['alpha']}
+    return numpy.array([name not in significant for name in sensor.names])
 
 
 def compute_unique_contribution(full_model, predictor, epoch, roi=None, metric=None):
@@ -1654,7 +1785,10 @@ def show_topomap_trio(data, diff, result, label, epoch, predictor, metric=None):
     # take the real mean difference, and only borrow the *mask* - which
     # sensors were significant - from the test result.
     mean_diff = diff[metric].mean('case')
-    significant = numpy.ma.getmaskarray(result.masked_parameter_map(pmin=pmin).x)
+    if ANALYSIS['test_region'] is None:
+        significant = numpy.ma.getmaskarray(result.masked_parameter_map(pmin=pmin).x)
+    else:  # TFCE: the test's own p values; an ROI test leaves out the sensors outside the ROI
+        significant = _not_significant(result, mean_diff.sensor)
     masked_diff = NDVar(numpy.ma.MaskedArray(mean_diff.x, mask=significant), mean_diff.dims, mean_diff.name, mean_diff.info)
     topomap_with_colorbar(None, masked_diff, label=f'{label}: test - baseline', **topo_kwargs)
 
