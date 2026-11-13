@@ -1590,6 +1590,22 @@ def _read_roi():
     return [line.strip() for line in text.splitlines() if line.strip() and not line.startswith('#')]
 
 
+def show_roi_file():
+    "Print where roi.txt is kept on the cluster and what it says (the ROI find_roi() wrote)"
+    if ANALYSIS['results_mode'] == 'compute':
+        path = RESULTS_DIR / ROI_FILE
+        text = path.read_text() if path.exists() else None
+    else:
+        data = _remote_file(ROI_FILE)
+        text = data.decode() if data is not None else None
+    where = f"~/{_setting('cluster_results')}/{ROI_FILE}"
+    if text is None:
+        print(f"No {ROI_FILE} on the cluster yet ({where}): the cluster job that runs this notebook writes it.")
+        return
+    print(f"{ROI_FILE} on the cluster: {where}\n")
+    print(text.rstrip())
+
+
 def _use_roi(notebook, required=False):
     roi = _read_roi()
     if not roi:
