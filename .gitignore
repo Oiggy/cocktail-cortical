@@ -70,3 +70,4 @@ doc/auto_examples
 *.eeg
 *.wav
 *.pickle
+CODEX_PROMPT.md
