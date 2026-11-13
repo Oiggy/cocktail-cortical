@@ -1579,31 +1579,53 @@ def find_roi(full_model, predictors, epoch='clean'):
 
 def _read_roi():
     "The sensors in roi.txt (written by the clean notebook), or None if it does not exist yet"
-    if ANALYSIS['results_mode'] == 'compute':
-        path = RESULTS_DIR / ROI_FILE
-        text = path.read_text() if path.exists() else None
-    else:
-        data = _remote_file(ROI_FILE)
-        text = data.decode() if data is not None else None
+    text = _roi_text()
     if text is None:
         return None
     return [line.strip() for line in text.splitlines() if line.strip() and not line.startswith('#')]
 
 
-def show_roi_file():
-    "Print where roi.txt is kept on the cluster and what it says (the ROI find_roi() wrote)"
+def _roi_text():
+    "The text of roi.txt on the cluster, or None if it is not there yet"
     if ANALYSIS['results_mode'] == 'compute':
         path = RESULTS_DIR / ROI_FILE
-        text = path.read_text() if path.exists() else None
-    else:
-        data = _remote_file(ROI_FILE)
-        text = data.decode() if data is not None else None
-    where = f"~/{_setting('cluster_results')}/{ROI_FILE}"
+        return path.read_text() if path.exists() else None
+    data = _remote_file(ROI_FILE)
+    return data.decode() if data is not None else None
+
+
+def _roi_where():
+    return f"~/{_setting('cluster_results')}/{ROI_FILE}"
+
+
+def show_roi_file():
+    "Print where roi.txt is kept on the cluster and what it says, with the sensors on one line"
+    text = _roi_text()
     if text is None:
-        print(f"No {ROI_FILE} on the cluster yet ({where}): the cluster job that runs this notebook writes it.")
+        print(f"No {ROI_FILE} on the cluster yet ({_roi_where()}): the cluster job that runs this notebook writes it.")
         return
-    print(f"{ROI_FILE} on the cluster: {where}\n")
-    print(text.rstrip())
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    roi = [line for line in lines if not line.startswith('#')]
+    print(f"{ROI_FILE} on the cluster: {_roi_where()}\n")
+    print('\n'.join(line for line in lines if line.startswith('#')))
+    print(f"\nROI ({len(roi)} sensors): {', '.join(roi)}")
+
+
+def show_roi(notebook):
+    """For the two-talker notebooks: import the ROI from the clean notebook's roi.txt, use it for
+    everything below and print it (one line, comma separated)"""
+    roi = _read_roi()
+    if not roi:
+        raise RuntimeError(f"No {ROI_FILE} yet: the clean notebook has to run before {notebook!r} "
+                           f"(submit_cluster_run('clean', '{notebook}') runs both, in that order).")
+    configure_analysis(roi=roi)
+    rule = next((line[len('# Rule: '):].split('.')[0] for line in (_roi_text() or '').splitlines()
+                 if line.startswith('# Rule: ')), None)
+    print(f"ROI imported from {ROI_FILE} ({_roi_where()}), determined by the clean-speech notebook "
+          f"from its onset and envelope test - baseline topomaps" + (f" ({rule})" if rule else '') + ".")
+    print(f"Used for every ROI test, STRF, TRF waveform and peak below.\n")
+    print(f"ROI ({len(roi)} sensors): {', '.join(roi)}")
+    return roi
 
 
 def _use_roi(notebook, required=False):
