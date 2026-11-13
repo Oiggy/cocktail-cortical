@@ -1522,27 +1522,25 @@ def _unpushed_changes():
     return ' and '.join(problems) or None
 
 
-# The ROI: an independent functional localizer from clean speech
+# The ROI, from the clean-speech topomaps
 #
 # As in Brodbeck et al. 2020 (PLOS Biology), the clean-speech model
 # comparisons, tested over the whole scalp, decide where the two-talker
-# conditions are analyzed: the ROI is every sensor where both onsets and the
-# envelope significantly improve the prediction of held-out EEG (TFCE,
-# one-tailed), a conjunction, so both maps define it together. Clean speech
-# is a separate condition from the two-talker data the ROI is then used for,
-# so choosing it there cannot bias those tests (an independent localizer;
-# Luck & Gaspelin 2017, Psychophysiology). It is written to RESULTS_DIR/roi.txt.
+# conditions are analyzed. The ROI is read off the test - baseline topomaps
+# of onsets and the envelope: every sensor shown in color (significant,
+# TFCE, one-tailed) on both maps. It uses the per-sensor significance that
+# colors the maps, not the drawn image, so it is exact at each sensor. It is
+# written to RESULTS_DIR/roi.txt.
 
 ROI_FILE = 'roi.txt'
 ROI_CITATIONS = (
-    "Brodbeck, Jiao, Hong & Simon (2020) PLOS Biology 18(10): e3000883 (localizer from clean speech)",
-    "Luck & Gaspelin (2017) Psychophysiology 54(1): 146-157 (independent localizer against circular analysis)",
+    "Brodbeck, Jiao, Hong & Simon (2020) PLOS Biology 18(10): e3000883 (ROI from the clean-speech maps)",
     "Smith & Nichols (2009) NeuroImage 44(1): 83-98 (TFCE); Mensen & Khatami (2013) NeuroImage 67: 111-118 (TFCE for EEG)",
 )
 
 
 def find_roi(full_model, predictors, epoch='clean'):
-    """The ROI from clean speech (see above): sensors where every one of `predictors` uniquely improves
+    """The ROI from the clean-speech topomaps (see above): sensors where every one of `predictors` uniquely improves
     `full_model` (TFCE, whole scalp, p <= alpha). If no sensor qualifies for every predictor, the
     sensors significant for any; if none at all, the a priori ROI_FALLBACK. Writes roi.txt inside a
     cluster job, sets the ROI for this notebook and returns it."""
@@ -1564,9 +1562,9 @@ def find_roi(full_model, predictors, epoch='clean'):
 
     counts = ', '.join(f"{predictor}: {len(s)}" for predictor, s in significant.items())
     text = '\n'.join([
-        "# ROI for the two-talker notebooks: an independent functional localizer from clean speech.",
-        f"# Sensors where {' and '.join(predictors)} uniquely improve the prediction of held-out EEG",
-        f"# ({epoch}; TFCE over the whole scalp, one-tailed, p <= {alpha}).",
+        "# ROI for the two-talker notebooks, read off the clean-speech test - baseline topomaps:",
+        f"# sensors where {' and '.join(predictors)} uniquely improve the prediction of held-out EEG",
+        f"# ({epoch}; colored = significant, TFCE over the whole scalp, one-tailed, p <= {alpha}).",
         f"# Rule: {rule}. Significant sensors per predictor: {counts}.",
         f"# Made {time.strftime('%Y-%m-%d %H:%M')} with fit parameters {json.dumps(_setting('parameters'), sort_keys=True)}.",
         *[f"# Method: {citation}" for citation in ROI_CITATIONS],
