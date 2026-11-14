@@ -1229,21 +1229,31 @@ def masked_onset(role=ATTEND):
     return f"{role}gammatone-on-masked-8"
 
 
-# The same split with each speaker at the level it has in the mixture
-# (predictors/inmix_onsets.py): the speaker files are 4x louder than the
-# speakers inside the mixture, which made part of every onset look masked.
-# inmix_onset is the plain onset at that level: overt + masked == inmix.
+# Predictors made as in Brodbeck et al. 2020 (predictors/brodbeck2020_predictors.py),
+# for the overt/masked notebooks: 256-band gammatone spectrogram (20-5,000 Hz)
+# scaled with exponent 0.6, overt/masked split at full resolution before
+# binning into 8 bands, each speaker at its level in the mixture.
+# b20_onset of a speaker == b20_overt_onset + b20_masked_onset.
 
-def inmix_onset(role=ATTEND):
-    return f"{role}gammatone-on-inmix-8"
-
-
-def overt_inmix_onset(role=ATTEND):
-    return f"{role}gammatone-on-overt-inmix-8"
+def b20_envelope(role=ATTEND):
+    return f"{role}gammatone-b20-8"
 
 
-def masked_inmix_onset(role=ATTEND):
-    return f"{role}gammatone-on-masked-inmix-8"
+def b20_onset(role=ATTEND):
+    return f"{role}gammatone-b20-on-8"
+
+
+def b20_overt_onset(role=ATTEND):
+    return f"{role}gammatone-b20-on-overt-8"
+
+
+def b20_masked_onset(role=ATTEND):
+    return f"{role}gammatone-b20-on-masked-8"
+
+
+def b20_level_onset(tier, role=MIX):
+    assert tier in ('low', 'mid', 'high')
+    return f"{role}gammatone-b20-on-{tier}-8"
 
 
 def level_onset(tier, role=MIX):
@@ -1454,6 +1464,74 @@ def check_alignment(poll=30):
         print(f"Stopped waiting. Job {job} keeps running; see its report later with cluster_log({job}, 1000).")
         return
     print(_job_log(job, 1000))
+
+
+# Files made by code that has since been replaced (relative to the dataset's
+# cocktail folder): the in-mixture overt/masked onsets of the replaced
+# predictors/inmix_onsets.py, and its 128-band per-ear spectrogram caches.
+# Superseded by predictors/brodbeck2020_predictors.py.
+SUPERSEDED_FILES = (
+    'bids/derivatives/predictors/*~gammatone-on-inmix-8.pickle',
+    'bids/derivatives/predictors/*~gammatone-on-overt-inmix-8.pickle',
+    'bids/derivatives/predictors/*~gammatone-on-masked-inmix-8.pickle',
+    'stimuli/*-gammatone-ear[0-9].pickle',
+)
+
+
+def cluster_cleanup():
+    """Free the cluster of what is no longer needed: cancels this project's queued and running jobs
+    (cocktail-*; never the JupyterHub session), deletes saved results that no notebook reads any more,
+    files made by replaced code (SUPERSEDED_FILES) and all but the newest job log and executed notebook per
+    notebook in cluster/runs. Leaves the data, the predictors the notebooks and cortical_analysis.ipynb use,
+    roi.txt and every result a notebook reads. Run it before starting new jobs: it cancels running ones."""
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
+    import parameters
+    keep = set()
+    for notebook in NOTEBOOKS:
+        names = _notebook_results(notebook, vars(parameters))
+        if not names:
+            raise RuntimeError(f"Could not work out which results {notebook!r} reads; nothing was deleted.")
+        keep |= names
+    results = _setting('cluster_results')
+    dataset = str(Path(results).parents[2])
+    runs = f"{_setting('cluster_repo')}/cluster/runs"
+    q = shlex.quote
+    script = '\n'.join([
+        'set -u; me="${USER:-$(whoami)}"',
+        f'size() {{ du -sb {q(dataset)} {q(runs)} 2>/dev/null | awk \'{{s += $1}} END {{print s + 0}}\'; }}',
+        'before=$(size)',
+        'echo "Cluster jobs (cocktail-*):"',
+        'jobs=$(squeue -u "$me" -h -o "%i %j" | awk \'$2 ~ /^cocktail-/ {print $1}\')',
+        'if [ -n "$jobs" ]; then squeue -u "$me" -h -o "  %i %j %T" | awk \'$2 ~ /^cocktail-/\'; '
+        'scancel $jobs && echo "  cancelled"; else echo "  none queued or running"; fi',
+        f'rm -f {q(results)}/requests/*.json',
+        'keep=$(mktemp)',
+        "cat > \"$keep\" <<'KEEP'", *sorted(keep), 'KEEP',
+        f'n=0; kept=0; if cd {q(results)} 2>/dev/null; then',
+        '  for f in *.pickle .*.part; do [ -e "$f" ] || continue;',
+        '    if grep -qxF "$f" "$keep"; then kept=$((kept + 1)); else rm -f "$f"; n=$((n + 1)); fi; done; fi',
+        'echo "Saved results: deleted $n that no notebook reads any more, kept $kept."',
+        'rm -f "$keep"; cd ~',
+        'n=0',
+        *[f'for f in {q(dataset)}/{pattern}; do [ -e "$f" ] && rm -f "$f" && n=$((n + 1)); done'
+          for pattern in SUPERSEDED_FILES],
+        f'for f in {q(dataset)}/bids/derivatives/predictors/.*.part; do [ -e "$f" ] && rm -f "$f" && n=$((n + 1)); done',
+        'echo "Files made by replaced code: deleted $n."',
+        f'n=0; if cd {q(runs)} 2>/dev/null; then declare -A seen;',
+        '  for f in $(ls -t); do case "$f" in *.out) k="${f%-*}.out";; *.ipynb) k="${f%_*}.ipynb";; *) continue;; esac;',
+        '    if [ -n "${seen[$k]:-}" ]; then rm -f "$f"; n=$((n + 1)); else seen[$k]=1; fi; done; fi',
+        'echo "Job logs and executed notebooks (cluster/runs): deleted $n older ones, kept the newest per notebook."',
+        'cd ~; after=$(size)',
+        'awk -v b="$before" -v a="$after" \'BEGIN {d = b - a; if (d >= 1e9) printf "Freed %.1f GB.\\n", d / 1e9; '
+        'else printf "Freed %.0f MB.\\n", d / 1e6}\'',
+        f'echo; echo "Space now used under {dataset}/bids/derivatives:"',
+        f'du -sh {q(dataset)}/bids/derivatives/* 2>/dev/null | sort -h | sed "s/^/  /"',
+        'if command -v diskusage_report >/dev/null; then echo; diskusage_report; fi',
+    ])
+    proc = _cluster(f"bash -lc {q(script)}")
+    print((proc.stdout.decode() + proc.stderr.decode()).rstrip())
 
 
 def _job_log(job=None, lines=40):

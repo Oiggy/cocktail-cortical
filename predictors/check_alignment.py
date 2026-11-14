@@ -327,24 +327,24 @@ for list_id in (1, 2):
                         f"list's mixture (masked {diff_masked:.2%}, overt {diff_overt:.2%} off); they were made with "
                         f"the other list's mixture")
 
-# 4. In-mixture overt/masked onsets ---------------------------------------------------
-say("\n=== 4. In-mixture overt/masked onsets (predictors/inmix_onsets.py: each speaker at its level in the mixture)")
+# 4. Brodbeck et al. 2020 overt/masked onsets ----------------------------------------
+say("\n=== 4. Overt/masked onsets made as in Brodbeck et al. 2020 (predictors/brodbeck2020_predictors.py)")
 inmix_share = {}
 for i in SEGMENTS:
     for stim in (f"{SPEAKER[0][i - 1]}_{i}", f"{SPEAKER[1][i - 1]}_{i}"):
         files = [predictor(stim, code) for code in
-                 ('gammatone-on-inmix-8', 'gammatone-on-overt-inmix-8', 'gammatone-on-masked-inmix-8')]
+                 ('gammatone-b20-on-8', 'gammatone-b20-on-overt-8', 'gammatone-b20-on-masked-8')]
         if any(f is None for f in files):
-            say(f"segment {i:>2} {stim}: not built yet (cluster/run_analysis.sbatch builds them before the "
+            say(f"segment {i:>2} {stim}: not made yet (cluster/run_analysis.sbatch makes them before the "
                 f"overt/masked notebooks)")
             continue
         inmix, overt, masked = (f.get_data(('frequency', 'time')) for f in files)
         error = numpy.abs(overt + masked - inmix).max() / (numpy.abs(inmix).max() or 1)
         share = masked.sum() / (inmix.sum() or 1)
         inmix_share.setdefault(SPATIAL[i - 1], []).append(share)
-        say(f"segment {i:>2} ({SPATIAL[i - 1]}) {stim}: masked share {share:.0%}; overt + masked vs inmix error {error:.1e}")
+        say(f"segment {i:>2} ({SPATIAL[i - 1]}) {stim}: masked share {share:.0%}; overt + masked vs onsets error {error:.1e}")
         if error > 1e-6:
-            problem(f"segment {i} {stim}: in-mixture overt + masked do not add up to the in-mixture onsets ({error:.1e})")
+            problem(f"segment {i} {stim}: overt + masked do not add up to the speaker's onsets ({error:.1e})")
 
 # Summary ------------------------------------------------------------------------
 say("\n=== Summary")
@@ -352,7 +352,7 @@ if masked_total:
     say("Masked share of onset magnitude (Brodbeck et al. 2020: ~33%): " + ', '.join(
         f"{condition} {numpy.mean(v):.0%}" for condition, v in masked_total.items()))
 if inmix_share:
-    say("Masked share with each speaker at its level in the mixture (in-mixture files; dichotic should be ~0%): "
+    say("Masked share, Brodbeck et al. 2020 predictors (paper, diotic: ~33%; dichotic should be ~0%): "
         + ', '.join(f"{condition} {numpy.mean(v):.0%}" for condition, v in inmix_share.items()))
 gains = {}
 for (list_id, i, ear), fit in audio.items():
