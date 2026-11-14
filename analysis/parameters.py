@@ -104,6 +104,23 @@ FULL_MASKED = (
     f"{envelope(IGNORE)} + {overt_onset(IGNORE)} + {masked_onset(IGNORE)} + "
     f"{envelope(MIX)} + {onset(MIX)}"
 )
+# Overt and masked onsets of one speaker removed together (their joint
+# contribution), and, for reference, the unsplit in-mixture onset removed.
+# Overt and masked come from the same onsets and rise and fall together, so
+# each can stand in for the other in a one-at-a-time test; removed together,
+# they should carry what the unsplit onset carries.
+FULL_MASKED_NO_ATTEND_ONSETS = (
+    f"{envelope(ATTEND)} + "
+    f"{envelope(IGNORE)} + {overt_onset(IGNORE)} + {masked_onset(IGNORE)} + "
+    f"{envelope(MIX)} + {onset(MIX)}"
+)
+FULL_MASKED_NO_IGNORE_ONSETS = (
+    f"{envelope(ATTEND)} + {overt_onset(ATTEND)} + {masked_onset(ATTEND)} + "
+    f"{envelope(IGNORE)} + "
+    f"{envelope(MIX)} + {onset(MIX)}"
+)
+FULL_INMIX_NO_ATTEND_ONSET = f"{envelope(ATTEND)} + {envelope(IGNORE)} + {inmix_onset(IGNORE)} + {envelope(MIX)} + {onset(MIX)}"
+FULL_INMIX_NO_IGNORE_ONSET = f"{envelope(ATTEND)} + {inmix_onset(ATTEND)} + {envelope(IGNORE)} + {envelope(MIX)} + {onset(MIX)}"
 LEVEL_AWARE = (
     f"{envelope(ATTEND)} + {onset(ATTEND)} + "
     f"{envelope(IGNORE)} + "
