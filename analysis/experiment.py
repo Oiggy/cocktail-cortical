@@ -1406,6 +1406,39 @@ def cluster_log(job=None, lines=40):
     print(_job_log(job, lines))
 
 
+def check_alignment(poll=30):
+    """Check on the cluster that the overt/masked onset predictors line up with the audio that was played
+    (predictors/check_alignment.py, a short job): submits it, waits and prints its report. From the Mac, first
+    brings the cluster's copy of the repo up to date with GitHub's main branch."""
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
+    update = '' if _on_cluster() else 'git pull --no-rebase --no-edit origin main && '
+    command = (f"cd {shlex.quote(_setting('cluster_repo'))} && {update}"
+               f"sbatch --account={shlex.quote(_setting('cluster_account'))} cluster/check_alignment.sbatch")
+    proc = _cluster(f"bash -lc {shlex.quote(command)}")
+    out = proc.stdout.decode() + proc.stderr.decode()
+    job = re.search(r'Submitted batch job (\d+)', out)
+    if proc.returncode or not job:
+        raise RuntimeError(f"Submitting the alignment check failed:\n{out}")
+    job = job[1]
+    print(f"Submitted the alignment check as job {job}; waiting for it (usually a few minutes).")
+    started, last = time.time(), None
+    try:
+        while True:
+            state = _cluster(f"bash -lc 'squeue -h -j {int(job)} -o %T'").stdout.decode().strip().lower()
+            if not state:
+                break
+            if state != last:
+                print(f"  {time.strftime('%H:%M')}  {job} {state}  ({(time.time() - started) / 60:.0f} min so far)")
+                last = state
+            time.sleep(poll)
+    except KeyboardInterrupt:
+        print(f"Stopped waiting. Job {job} keeps running; see its report later with cluster_log({job}, 1000).")
+        return
+    print(_job_log(job, 1000))
+
+
 def _job_log(job=None, lines=40):
     pattern = f"cocktail-*-{int(job)}.out" if job else "cocktail-*.out"
     command = (
