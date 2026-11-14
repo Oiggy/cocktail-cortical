@@ -36,7 +36,7 @@ from eelbrain import *
 from experiment import (
     e, topomap_with_colorbar, FIGURES_DIR, set_partitions, configure_analysis,
     ATTEND, IGNORE, MIX, envelope, onset, level_onset,
-    b20_envelope, b20_onset, b20_overt_onset, b20_masked_onset, b20_level_onset,
+    split_envelope, split_onset, split_overt_onset, split_masked_onset, split_level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
     print_peak_table, plot_trf_bins, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError, find_roi, show_roi_file, show_roi, check_alignment, cluster_cleanup,
@@ -88,24 +88,49 @@ def preprocess():
 # '' = attended speaker, 'bg~' = ignored speaker, 'mix~' = the mixture.
 FULL_CLEAN = f"{envelope(ATTEND)} + {onset(ATTEND)}"
 FULL_BASE = f"{envelope(ATTEND)} + {onset(ATTEND)} + {envelope(IGNORE)} + {onset(IGNORE)} + {envelope(MIX)} + {onset(MIX)}"
-# The overt/masked notebooks: every predictor made as in Brodbeck et al.
-# 2020 (predictors/brodbeck2020_predictors.py): 256-band gammatone
-# spectrogram (20-5,000 Hz) scaled with exponent 0.6, edge-detector onsets,
-# overt/masked split at full resolution and then binned into 8 bands, each
-# speaker at the level it has in the mixture that was played. overt + masked
-# == the speaker's onsets, so FULL_INMIX (the same onsets unsplit) is the
-# baseline for the split, as in the paper. (The other notebooks keep the
-# gammatone_predictors.py predictors; cortical_analysis.ipynb keeps the older
-# overt_onset/masked_onset from experiment.py.)
-overt_onset, masked_onset = b20_overt_onset, b20_masked_onset
+# The overt/masked notebooks (predictors/brodbeck2020_predictors.py): the
+# overt/masked split is made element-wise at full frequency resolution and
+# only then binned into 8 bands, with each speaker at the level it has in the
+# mixture that was played, as Brodbeck et al. 2020 defined it. Which
+# spectrogram it starts from:
+#   'b20': the paper's (256 bands 20-5,000 Hz, scaled with exponent 0.6)
+#   'log': gammatone_predictors.py's (128 bands 80-8,000 Hz, log(x + 1)), the one
+#          under which the speakers' onsets predict this EEG (diotic.ipynb)
+# Results of the two are kept apart on the cluster; switch and rerun to
+# compare. (cluster_cleanup() keeps only the results of the recipe chosen here.)
+SPLIT_RECIPE = 'log'
+SPLIT_COLUMN = f"gammatone_{SPLIT_RECIPE}"  # start of the overt/masked TRF column names
+
+
+# The overt/masked notebooks' predictors, in the chosen recipe
+def split_env(role=ATTEND):
+    return split_envelope(role, recipe=SPLIT_RECIPE)
+
+
+def split_on(role=ATTEND):
+    return split_onset(role, recipe=SPLIT_RECIPE)
+
+
+def split_tier(tier, role=MIX):
+    return split_level_onset(tier, role, recipe=SPLIT_RECIPE)
+
+
+def overt_onset(role=ATTEND):
+    return split_overt_onset(role, recipe=SPLIT_RECIPE)
+
+
+def masked_onset(role=ATTEND):
+    return split_masked_onset(role, recipe=SPLIT_RECIPE)
+
+
 FULL_INMIX = (
-    f"{b20_envelope(ATTEND)} + {b20_onset(ATTEND)} + {b20_envelope(IGNORE)} + {b20_onset(IGNORE)} + "
-    f"{b20_envelope(MIX)} + {b20_onset(MIX)}"
+    f"{split_env(ATTEND)} + {split_on(ATTEND)} + {split_env(IGNORE)} + {split_on(IGNORE)} + "
+    f"{split_env(MIX)} + {split_on(MIX)}"
 )
 FULL_MASKED = (
-    f"{b20_envelope(ATTEND)} + {overt_onset(ATTEND)} + {masked_onset(ATTEND)} + "
-    f"{b20_envelope(IGNORE)} + {overt_onset(IGNORE)} + {masked_onset(IGNORE)} + "
-    f"{b20_envelope(MIX)} + {b20_onset(MIX)}"
+    f"{split_env(ATTEND)} + {overt_onset(ATTEND)} + {masked_onset(ATTEND)} + "
+    f"{split_env(IGNORE)} + {overt_onset(IGNORE)} + {masked_onset(IGNORE)} + "
+    f"{split_env(MIX)} + {split_on(MIX)}"
 )
 # Overt and masked onsets of one speaker removed together (their joint
 # contribution), and, for reference, the same onsets unsplit removed.
@@ -113,25 +138,25 @@ FULL_MASKED = (
 # each can stand in for the other in a one-at-a-time test; removed together,
 # they should carry what the unsplit onsets carry.
 FULL_MASKED_NO_ATTEND_ONSETS = (
-    f"{b20_envelope(ATTEND)} + "
-    f"{b20_envelope(IGNORE)} + {overt_onset(IGNORE)} + {masked_onset(IGNORE)} + "
-    f"{b20_envelope(MIX)} + {b20_onset(MIX)}"
+    f"{split_env(ATTEND)} + "
+    f"{split_env(IGNORE)} + {overt_onset(IGNORE)} + {masked_onset(IGNORE)} + "
+    f"{split_env(MIX)} + {split_on(MIX)}"
 )
 FULL_MASKED_NO_IGNORE_ONSETS = (
-    f"{b20_envelope(ATTEND)} + {overt_onset(ATTEND)} + {masked_onset(ATTEND)} + "
-    f"{b20_envelope(IGNORE)} + "
-    f"{b20_envelope(MIX)} + {b20_onset(MIX)}"
+    f"{split_env(ATTEND)} + {overt_onset(ATTEND)} + {masked_onset(ATTEND)} + "
+    f"{split_env(IGNORE)} + "
+    f"{split_env(MIX)} + {split_on(MIX)}"
 )
 FULL_INMIX_NO_ATTEND_ONSET = (
-    f"{b20_envelope(ATTEND)} + {b20_envelope(IGNORE)} + {b20_onset(IGNORE)} + {b20_envelope(MIX)} + {b20_onset(MIX)}")
+    f"{split_env(ATTEND)} + {split_env(IGNORE)} + {split_on(IGNORE)} + {split_env(MIX)} + {split_on(MIX)}")
 FULL_INMIX_NO_IGNORE_ONSET = (
-    f"{b20_envelope(ATTEND)} + {b20_onset(ATTEND)} + {b20_envelope(IGNORE)} + {b20_envelope(MIX)} + {b20_onset(MIX)}")
+    f"{split_env(ATTEND)} + {split_on(ATTEND)} + {split_env(IGNORE)} + {split_env(MIX)} + {split_on(MIX)}")
 # Level-aware control (Brodbeck et al. 2020): no ignored-speaker onsets, the
 # mixture onsets split into three intensity tiers instead.
 LEVEL_AWARE = (
-    f"{b20_envelope(ATTEND)} + {b20_onset(ATTEND)} + "
-    f"{b20_envelope(IGNORE)} + "
-    f"{b20_envelope(MIX)} + {b20_level_onset('low')} + {b20_level_onset('mid')} + {b20_level_onset('high')}"
+    f"{split_env(ATTEND)} + {split_on(ATTEND)} + "
+    f"{split_env(IGNORE)} + "
+    f"{split_env(MIX)} + {split_tier('low')} + {split_tier('mid')} + {split_tier('high')}"
 )
 
 

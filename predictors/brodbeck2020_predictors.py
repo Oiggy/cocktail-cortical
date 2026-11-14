@@ -15,6 +15,13 @@ Predictors for the overt/masked notebooks, made as in Brodbeck et al. 2020
 - intensity tiers (the level-aware control): the mixture's 8-band onsets split
   into low/mid/high by the tertiles of each onset's summed intensity, per band.
 
+The same procedure is also made with gammatone_predictors.py's spectrogram
+(128 bands from 80 to 8,000 Hz, log(x + 1), all bands binned), saved as
+gammatone-log-*: under that recipe the speakers' own onsets predict this EEG
+(diotic.ipynb), under the paper's they barely do. SPLIT_RECIPE in
+analysis/parameters.py picks which one the overt/masked notebooks use; both
+are made (SPLIT_RECIPES="b20 log").
+
 Two things this dataset needs that the paper's did not:
 - Each speaker is compared at the level it has in the mixture. Brodbeck's
   mixtures were the two speakers added together; here the speaker files are
@@ -59,10 +66,20 @@ DATA_ROOT = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT.parent / "data
 STIMULUS_DIR = DATA_ROOT / "stimuli"
 PREDICTOR_DIR = DATA_ROOT / "bids" / "derivatives" / "predictors"
 
-F_MIN, F_MAX, N_BANDS = 20, 5000, 256
-EXPONENT = 0.6
 EDGE_C = 30
-BIN_F_MIN, N_BINS = 100, 8
+N_BINS = 8
+# Two spectrogram recipes, both split at full resolution with each speaker at
+# its level in the mixture:
+#   b20: the paper's (256 bands, 20-5,000 Hz, exponent 0.6, bins from 100 Hz)
+#   log: gammatone_predictors.py's (128 bands, 80-8,000 Hz, log(x + 1), all bands binned),
+#        under which the speakers' onsets predict this EEG (diotic.ipynb)
+RECIPES = {
+    'b20': dict(f_min=20, f_max=5000, n_bands=256, transform=lambda x: x ** 0.6, bin_f_min=100,
+                envelope_at_mix_level=False),  # x ** 0.6: the level is only a constant factor
+    'log': dict(f_min=80, f_max=8000, n_bands=128, transform=lambda x: numpy.log(x + 1), bin_f_min=0,
+                envelope_at_mix_level=True),
+}
+R = RECIPES['b20']  # the recipe being made (set by main())
 CODE = 'gammatone-b20'
 TIERS = ('low', 'mid', 'high')
 EXACT_R2 = 0.99            # speakers explain the mixture waveform exactly: plain gains
@@ -107,20 +124,25 @@ def read_wav(name):
 # 256-band spectrograms, computed in parallel and kept only while this runs
 
 def _gammatone_task(args):
-    name, channel, path = args
+    name, channel, path, f_min, f_max, n_bands = args
     if path.exists():
         return path
     wav = load.wav(STIMULUS_DIR / f"{name}.wav")
     if channel is not None:
         wav = wav.sub(channel=channel)
-    gt = gammatone_bank(wav, F_MIN, F_MAX, N_BANDS, location='left', tstep=0.001)
+    gt = gammatone_bank(wav, f_min, f_max, n_bands, location='left', tstep=0.001)
     gt = NDVar(gt.x.astype(numpy.float32), gt.dims, gt.name)
     save_atomic(gt, path)
     return path
 
 
 def spectrogram_path(scratch, name, channel):
-    return scratch / f"{name}-gt{N_BANDS}{'' if channel is None else f'-ear{channel}'}.pickle"
+    if CODE == 'gammatone-log' and channel is None:
+        # gammatone_predictors.py already made this one (128 bands, 80-8,000 Hz, mono files)
+        stored = STIMULUS_DIR / f"{name}-gammatone.pickle"
+        if stored.exists():
+            return stored
+    return scratch / f"{name}-gt{R['n_bands']}{'' if channel is None else f'-ear{channel}'}.pickle"
 
 
 def make_spectrograms(scratch, names, workers):
@@ -128,7 +150,7 @@ def make_spectrograms(scratch, names, workers):
     for name in names:
         n = n_channels(name)
         for channel in ([None] if n == 1 else range(n)):
-            tasks.append((name, channel, spectrogram_path(scratch, name, channel)))
+            tasks.append((name, channel, spectrogram_path(scratch, name, channel), R['f_min'], R['f_max'], R['n_bands']))
     todo = [t for t in tasks if not t[2].exists()]
     print(f"gammatone spectrograms: {len(todo)} to compute ({workers} at a time)", flush=True)
     with ProcessPoolExecutor(workers) as pool:
@@ -151,7 +173,7 @@ def onsets(x, dims):
 
 def binner(freq):
     "Function: (256 bands x time) array -> (8 bands x time) NDVar data, summed over ERB-equal bins from 100 Hz"
-    keep = numpy.flatnonzero(freq.values >= BIN_F_MIN)
+    keep = numpy.flatnonzero(freq.values >= R['bin_f_min'])
     edges = numpy.linspace(0, len(keep), N_BINS + 1).round().astype(int)
     groups = [keep[a:b] for a, b in zip(edges[:-1], edges[1:])]
     centers = [float(numpy.exp(numpy.log(freq.values[g]).mean())) for g in groups]
@@ -188,18 +210,21 @@ def band_gains(mix_x, fg_x, bg_x):
     return gains
 
 
-def main():
+def main(recipe):
+    global R, CODE
+    R, CODE = RECIPES[recipe], f'gammatone-{recipe}'
+    T = R['transform']
     mixtures = [(list_id, i, f"List_{list_id}_stim_{i}") for list_id in (1, 2) for i in SEGMENTS]
     speaker_names = sorted({s for i in SEGMENTS for s in speakers(1, i)})
     mixture_kinds = ['', 'on', *(f'on-{t}' for t in TIERS)]
     speaker_kinds = ['', 'on', 'on-overt', 'on-masked']
     if all(out(m, k).exists() for _, _, m in mixtures for k in mixture_kinds) and \
             all(out(s, k).exists() for s in speaker_names for k in speaker_kinds):
-        print("Brodbeck et al. 2020 predictors already made.")
+        print(f"{CODE} predictors already made.")
         return
 
     scratch_root = os.environ.get('SLURM_TMPDIR') or os.environ.get('SCRATCH') or tempfile.gettempdir()
-    scratch = Path(tempfile.mkdtemp(prefix='b20-', dir=scratch_root))
+    scratch = Path(tempfile.mkdtemp(prefix=f'{recipe}-', dir=scratch_root))
     workers = max(1, min(16, int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count() or 1)) // 2))
     try:
         make_spectrograms(scratch, [m for _, _, m in mixtures] + speaker_names, workers)
@@ -212,8 +237,8 @@ def main():
             n = min(e.time.nsamples for e in ears)
             dims = (freq, UTS(0, 0.001, n))
             ear_x = [e.get_data(('frequency', 'time'))[:, :n].astype(float) for e in ears]
-            ear_on = [onsets(x ** EXPONENT, dims) for x in ear_x]
-            env8 = numpy.mean([to8(x ** EXPONENT) for x in ear_x], 0)
+            ear_on = [onsets(T(x), dims) for x in ear_x]
+            env8 = numpy.mean([to8(T(x)) for x in ear_x], 0)
             on8 = numpy.mean([to8(o) for o in ear_on], 0)
             mixture_onsets8[mix] = on8
             if not out(mix).exists():
@@ -233,7 +258,7 @@ def main():
             m = min(n, *(g.time.nsamples for g in src.values()))
             src_x = {s: g.get_data(('frequency', 'time'))[:, :m].astype(float) for s, g in src.items()}
             dims_m = (freq, UTS(0, 0.001, m))
-            parts = {s: {k: [] for k in ('on', 'on-overt', 'on-masked')} for s in (fg, bg)}
+            parts = {s: {k: [] for k in ('', 'on', 'on-overt', 'on-masked')} for s in (fg, bg)}
             for c, (x_mix, o_mix) in enumerate(zip(ear_x, ear_on)):
                 x_mix, o_mix = x_mix[:, :m], o_mix[:, :m]
                 (a, b), r2 = waveform_gains(mix_wav[:, c], fg_mono, bg_mono, rate)
@@ -246,14 +271,16 @@ def main():
                     how = f"waveform R^2 {r2:.3f}: per-band gains, mean {g[0].mean():.3f} / {g[1].mean():.3f}"
                 print(f"  ear {c}: {how}", flush=True)
                 for s in (fg, bg):
-                    o_src = onsets((src_x[s] * gains[s][:, None]) ** EXPONENT, dims_m)
+                    scaled = T(src_x[s] * gains[s][:, None])
+                    parts[s][''].append(to8(scaled))
+                    o_src = onsets(scaled, dims_m)
                     parts[s]['on'].append(to8(o_src))
                     parts[s]['on-overt'].append(to8(numpy.minimum(o_src, o_mix)))
                     parts[s]['on-masked'].append(to8(numpy.clip(o_src - o_mix, 0, None)))
             for s, role in ((fg, 'attend'), (bg, 'ignore')):
-                if not out(s).exists():
-                    save_8(to8(src_x[s] ** EXPONENT), freq8, m, out(s))
                 result = {k: numpy.mean(v, 0) for k, v in parts[s].items()}
+                if not R['envelope_at_mix_level']:
+                    result[''] = to8(T(src_x[s]))
                 for k, x8 in result.items():
                     save_8(x8, freq8, m, out(s, k))
                 share = result['on-masked'].sum() / (result['on'].sum() or 1)
@@ -283,8 +310,9 @@ def main():
             print("intensity tiers done", flush=True)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
-    print("Brodbeck et al. 2020 predictors ready.")
+    print(f"{CODE} predictors ready.")
 
 
 if __name__ == '__main__':
-    main()
+    for recipe in os.environ.get('SPLIT_RECIPES', 'b20 log').split():
+        main(recipe)

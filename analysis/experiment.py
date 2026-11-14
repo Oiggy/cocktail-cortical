@@ -1229,31 +1229,32 @@ def masked_onset(role=ATTEND):
     return f"{role}gammatone-on-masked-8"
 
 
-# Predictors made as in Brodbeck et al. 2020 (predictors/brodbeck2020_predictors.py),
-# for the overt/masked notebooks: 256-band gammatone spectrogram (20-5,000 Hz)
-# scaled with exponent 0.6, overt/masked split at full resolution before
-# binning into 8 bands, each speaker at its level in the mixture.
-# b20_onset of a speaker == b20_overt_onset + b20_masked_onset.
+# Predictors for the overt/masked notebooks (predictors/brodbeck2020_predictors.py):
+# overt/masked split at full frequency resolution, then binned into 8 bands,
+# each speaker at its level in the mixture. Two spectrogram recipes:
+# 'b20' as in Brodbeck et al. 2020 (256 bands 20-5,000 Hz, exponent 0.6) and
+# 'log' as gammatone_predictors.py (128 bands 80-8,000 Hz, log(x + 1)).
+# A speaker's split_onset == split_overt_onset + split_masked_onset.
 
-def b20_envelope(role=ATTEND):
-    return f"{role}gammatone-b20-8"
-
-
-def b20_onset(role=ATTEND):
-    return f"{role}gammatone-b20-on-8"
+def split_envelope(role=ATTEND, recipe='b20'):
+    return f"{role}gammatone-{recipe}-8"
 
 
-def b20_overt_onset(role=ATTEND):
-    return f"{role}gammatone-b20-on-overt-8"
+def split_onset(role=ATTEND, recipe='b20'):
+    return f"{role}gammatone-{recipe}-on-8"
 
 
-def b20_masked_onset(role=ATTEND):
-    return f"{role}gammatone-b20-on-masked-8"
+def split_overt_onset(role=ATTEND, recipe='b20'):
+    return f"{role}gammatone-{recipe}-on-overt-8"
 
 
-def b20_level_onset(tier, role=MIX):
+def split_masked_onset(role=ATTEND, recipe='b20'):
+    return f"{role}gammatone-{recipe}-on-masked-8"
+
+
+def split_level_onset(tier, role=MIX, recipe='b20'):
     assert tier in ('low', 'mid', 'high')
-    return f"{role}gammatone-b20-on-{tier}-8"
+    return f"{role}gammatone-{recipe}-on-{tier}-8"
 
 
 def level_onset(tier, role=MIX):
