@@ -1229,6 +1229,23 @@ def masked_onset(role=ATTEND):
     return f"{role}gammatone-on-masked-8"
 
 
+# The same split with each speaker at the level it has in the mixture
+# (predictors/inmix_onsets.py): the speaker files are 4x louder than the
+# speakers inside the mixture, which made part of every onset look masked.
+# inmix_onset is the plain onset at that level: overt + masked == inmix.
+
+def inmix_onset(role=ATTEND):
+    return f"{role}gammatone-on-inmix-8"
+
+
+def overt_inmix_onset(role=ATTEND):
+    return f"{role}gammatone-on-overt-inmix-8"
+
+
+def masked_inmix_onset(role=ATTEND):
+    return f"{role}gammatone-on-masked-inmix-8"
+
+
 def level_onset(tier, role=MIX):
     assert tier in ('low', 'mid', 'high')
     return f"{role}gammatone-on-{tier}-8"

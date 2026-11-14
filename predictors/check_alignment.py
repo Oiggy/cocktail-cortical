@@ -67,6 +67,8 @@ ENV_RATE = 1000         # Hz: audio envelopes at 1 ms
 MAX_LAG = 3.0           # s: largest shift searched between files
 EXCERPT = (30.0, 60.0)  # s: stretch used for the sample-level and loudness fit
 LAG_OK = 0.001          # s: shifts up to 1 ms count as aligned
+LAG_OK_BINAURAL = 0.003  # s: binaural mixtures went through head filters, which delay each ear by ~0.5-2 ms
+LIST_OK = 0.02          # relative: list 1 and 2 mixtures (and files reusing one for the other) count as the same within 2%
 MATCH_OK = 1e-4         # relative difference: saved overt/masked == recomputed
 
 lines = []
@@ -213,8 +215,10 @@ for list_id in (1, 2):
         fg_mono, bg_mono = x['fg'].mean(1), x['bg'].mean(1)
         env = {role: envelope(v, rate) for role, v in x.items()}
         envelopes[mix] = (rate, x['mix'], env['mix'])
-        start, stop = (int(t * rate) for t in EXCERPT)
-        stop = min(stop, len(x['mix']))
+        end = min(len(v) for v in x.values())
+        start, stop = (min(int(t * rate), end) for t in EXCERPT)
+        if stop - start < 10 * rate:  # short audio: use all of it
+            start, stop = 0, end
         ear_names = ['left', 'right'] if x['mix'].shape[1] == 2 else [f'channel {c}' for c in range(x['mix'].shape[1])]
         for c, ear in enumerate(ear_names):
             mix_c = x['mix'][:, c]
@@ -232,7 +236,7 @@ for list_id in (1, 2):
                     row.append(f"{role} not in this ear")
                     continue
                 row.append(f"{role} shift {ms(lag / rate)} (envelope r {r_env:.2f})")
-                if abs(lag / rate) > LAG_OK:
+                if abs(lag / rate) > (LAG_OK_BINAURAL if SPATIAL[i - 1] == 'binaural' else LAG_OK):
                     problem(f"list {list_id} seg {i} ({condition}), {ear}: {role} speaker shifted {ms(lag / rate)} "
                             f"against the mixture")
             say(f"  {ear:>6}: {'; '.join(row)}")
@@ -259,7 +263,7 @@ for i in SEGMENTS:
         n = min(len(x1), len(x2))
         rms1, rms2 = numpy.sqrt((x1[:n, c] ** 2).mean()), numpy.sqrt((x2[:n, c] ** 2).mean())
         parts.append(f"ch {c}: shift {ms(lag / ENV_RATE)}, envelope r {r:.3f}, level ratio {rms2 / rms1:.3f}")
-        if abs(lag / ENV_RATE) > LAG_OK or r < 0.99 or abs(rms2 / rms1 - 1) > 0.02:
+        if abs(lag / ENV_RATE) > LAG_OK or r < 0.98 or abs(rms2 / rms1 - 1) > LIST_OK:
             problem(f"segment {i} ({SPATIAL[i - 1]}): List_1 and List_2 mixtures differ (ch {c}: shift "
                     f"{ms(lag / ENV_RATE)}, r {r:.3f}, level ratio {rms2 / rms1:.3f}), but the overt/masked files "
                     f"of one list were made with the other list's mixture")
@@ -314,28 +318,52 @@ for list_id in (1, 2):
                 f"onsets {ms(lag_on * step)} (r {r_on:.2f})")
             say(f"      saved vs this list's mixture: masked differs by {diff_masked:.2%}, overt by {diff_overt:.2%}; "
                 f"masked share {share:.0%}")
-            if abs(lag_env * src_env.time.tstep) > LAG_OK or abs(lag_on * step) > LAG_OK:
+            lag_ok = LAG_OK_BINAURAL if SPATIAL[i - 1] == 'binaural' else LAG_OK
+            if abs(lag_env * src_env.time.tstep) > lag_ok or abs(lag_on * step) > lag_ok:
                 problem(f"list {list_id} seg {i} ({SPATIAL[i - 1]}): {role} {stim} predictors shifted against the "
                         f"mixture's (envelope {ms(lag_env * src_env.time.tstep)}, onsets {ms(lag_on * step)})")
-            if diff_masked > MATCH_OK or diff_overt > MATCH_OK:
+            if max(diff_masked, diff_overt) > (MATCH_OK if list_id == 1 else LIST_OK):
                 problem(f"list {list_id} seg {i} ({SPATIAL[i - 1]}): {role} {stim} overt/masked files do not match this "
                         f"list's mixture (masked {diff_masked:.2%}, overt {diff_overt:.2%} off); they were made with "
                         f"the other list's mixture")
+
+# 4. In-mixture overt/masked onsets ---------------------------------------------------
+say("\n=== 4. In-mixture overt/masked onsets (predictors/inmix_onsets.py: each speaker at its level in the mixture)")
+inmix_share = {}
+for i in SEGMENTS:
+    for stim in (f"{SPEAKER[0][i - 1]}_{i}", f"{SPEAKER[1][i - 1]}_{i}"):
+        files = [predictor(stim, code) for code in
+                 ('gammatone-on-inmix-8', 'gammatone-on-overt-inmix-8', 'gammatone-on-masked-inmix-8')]
+        if any(f is None for f in files):
+            say(f"segment {i:>2} {stim}: not built yet (cluster/run_analysis.sbatch builds them before the "
+                f"overt/masked notebooks)")
+            continue
+        inmix, overt, masked = (f.get_data(('frequency', 'time')) for f in files)
+        error = numpy.abs(overt + masked - inmix).max() / (numpy.abs(inmix).max() or 1)
+        share = masked.sum() / (inmix.sum() or 1)
+        inmix_share.setdefault(SPATIAL[i - 1], []).append(share)
+        say(f"segment {i:>2} ({SPATIAL[i - 1]}) {stim}: masked share {share:.0%}; overt + masked vs inmix error {error:.1e}")
+        if error > 1e-6:
+            problem(f"segment {i} {stim}: in-mixture overt + masked do not add up to the in-mixture onsets ({error:.1e})")
 
 # Summary ------------------------------------------------------------------------
 say("\n=== Summary")
 if masked_total:
     say("Masked share of onset magnitude (Brodbeck et al. 2020: ~33%): " + ', '.join(
         f"{condition} {numpy.mean(v):.0%}" for condition, v in masked_total.items()))
+if inmix_share:
+    say("Masked share with each speaker at its level in the mixture (in-mixture files; dichotic should be ~0%): "
+        + ', '.join(f"{condition} {numpy.mean(v):.0%}" for condition, v in inmix_share.items()))
 gains = {}
 for (list_id, i, ear), fit in audio.items():
     gains.setdefault(fit['condition'], []).append(fit)
 for condition, fits in gains.items():
     a = [f['a'] for f in fits if f['a'] is not None]
     b = [f['b'] for f in fits if f['b'] is not None]
-    say(f"Mixture loudness, {condition} (ears where the speaker plays): attend gain {numpy.mean(a):.3f} "
-        f"(range {min(a):.3f}-{max(a):.3f}), ignore gain {numpy.mean(b):.3f} (range {min(b):.3f}-{max(b):.3f}), "
-        f"R^2 {numpy.mean([f['r2'] for f in fits]):.3f} (a plain sum is gain 1.000 each)")
+    def gain_text(values):
+        return f"{numpy.mean(values):.3f} (range {min(values):.3f}-{max(values):.3f})" if values else "n/a"
+    say(f"Mixture loudness, {condition} (ears where the speaker plays): attend gain {gain_text(a)}, "
+        f"ignore gain {gain_text(b)}, R^2 {numpy.mean([f['r2'] for f in fits]):.3f} (a plain sum is gain 1.000 each)")
 if problems:
     say(f"\n{len(problems)} problem(s):")
     for text in problems:

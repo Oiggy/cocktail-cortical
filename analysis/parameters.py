@@ -35,7 +35,7 @@ RESULTS_MODE = os.environ.setdefault('COCKTAIL_RESULTS', 'cluster' if ON_CLUSTER
 from eelbrain import *
 from experiment import (
     e, topomap_with_colorbar, FIGURES_DIR, set_partitions, configure_analysis,
-    ATTEND, IGNORE, MIX, envelope, onset, overt_onset, masked_onset, level_onset,
+    ATTEND, IGNORE, MIX, envelope, onset, inmix_onset, overt_inmix_onset, masked_inmix_onset, level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
     print_peak_table, plot_trf_bins, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError, find_roi, show_roi_file, show_roi, check_alignment,
@@ -87,6 +87,18 @@ def preprocess():
 # '' = attended speaker, 'bg~' = ignored speaker, 'mix~' = the mixture.
 FULL_CLEAN = f"{envelope(ATTEND)} + {onset(ATTEND)}"
 FULL_BASE = f"{envelope(ATTEND)} + {onset(ATTEND)} + {envelope(IGNORE)} + {onset(IGNORE)} + {envelope(MIX)} + {onset(MIX)}"
+# Overt and masked onsets: each speaker's onsets split by the mixture,
+# with the speaker at the level it has in the mixture (its own .wav file
+# is 4x louder, which made part of every onset look masked; see
+# predictors/inmix_onsets.py). overt + masked == inmix_onset, the plain
+# onset at that level, so FULL_INMIX is the baseline for the split, as in
+# Brodbeck et al. 2020. (cortical_analysis.ipynb keeps the older
+# file-level overt_onset/masked_onset from experiment.py.)
+overt_onset, masked_onset = overt_inmix_onset, masked_inmix_onset
+FULL_INMIX = (
+    f"{envelope(ATTEND)} + {inmix_onset(ATTEND)} + {envelope(IGNORE)} + {inmix_onset(IGNORE)} + "
+    f"{envelope(MIX)} + {onset(MIX)}"
+)
 FULL_MASKED = (
     f"{envelope(ATTEND)} + {overt_onset(ATTEND)} + {masked_onset(ATTEND)} + "
     f"{envelope(IGNORE)} + {overt_onset(IGNORE)} + {masked_onset(IGNORE)} + "

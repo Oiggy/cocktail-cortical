@@ -37,6 +37,10 @@ RESULTS="$WORK/dataset/cocktail/bids/derivatives/results"
 
 cd "$REPO/analysis"
 python -c "from parameters import preprocess; preprocess()" || exit 1
+# The overt/masked notebooks need the in-mixture onsets (built once, then skipped)
+if [[ " $NOTEBOOKS " == *_overt_masked_onsets* ]]; then
+    python "$REPO/predictors/inmix_onsets.py" || exit 1
+fi
 
 failed=()
 for nb in $NOTEBOOKS; do
