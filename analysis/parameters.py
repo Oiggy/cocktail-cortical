@@ -39,7 +39,7 @@ from experiment import (
     split_envelope, split_onset, split_overt_onset, split_masked_onset, split_level_onset,
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
-    print_peak_table, plot_trf_bins, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError, find_roi, show_roi_file, show_roi, check_alignment, cluster_cleanup,
+    print_peak_table, plot_trf_bins, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError, find_roi, show_roi_file, show_roi, check_alignment, cluster_cleanup, tfce_summary,
 )
 import matplotlib.pyplot as plt
 import numpy

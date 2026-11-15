@@ -1924,6 +1924,15 @@ def _not_significant(result, sensor):
     return numpy.array([name not in significant for name in sensor.names])
 
 
+def tfce_summary(result):
+    """A TFCE model comparison as Brodbeck et al. 2020 report it: the largest t over the sensors tested
+    (the whole scalp, or the ROI) and the test's p (its smallest p over those sensors)"""
+    t_max = float(numpy.nanmax(result.t.x))
+    p_min = float(numpy.nanmin(result.p.x))
+    p_text = "p < 0.001" if p_min < 0.001 else f"p = {p_min:.3f}"
+    return f"t_max = {t_max:.2f}, {p_text}"
+
+
 def compute_unique_contribution(full_model, predictor, epoch, roi=None, metric=None):
     "Omission comparison: does `predictor` uniquely improve on `full_model` with it removed?"
     return _model_test(f"{full_model} @ {predictor}", epoch, roi, metric)
