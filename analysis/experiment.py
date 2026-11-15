@@ -2150,20 +2150,34 @@ def _bin_stats(data, column, subtract=None, roi=None, error=None):
     return trf.time.times * 1e3, trf.frequency.values, mean, spread
 
 
+def _max_statistic_p(y):
+    """p values of a two-tailed one-sample t-test of `y` (case x [frequency x] time) against 0 at every point
+    from 0 ms on, corrected with the maximum statistic over all those points (as Brodbeck et al. 2020 tested
+    their STRFs); returned as ([frequency x] time), NaN before 0 ms"""
+    names = tuple(n for n in y.dimnames if n not in ('case', 'time')) + ('time',)
+    tested = y.sub(time=(0, None))
+    result = testnd.TTestOneSample(tested, tail=0, samples=ANALYSIS['samples'])
+    p_tested = result.p.get_data(names)
+    times = y.time.times
+    p = numpy.full(p_tested.shape[:-1] + (len(times),), numpy.nan)
+    p[..., times >= tested.time.tmin - 1e-9] = p_tested
+    return p
+
+
 def plot_attention_effect(data, attend_column, ignore_column, title, roi=None):
-    """The attention effect as one waveform (Brodbeck et al. 2020, Fig 3 and 4 style): each subject's attend -
-    ignore TRF, ROI-averaged and summed over the frequency bins (extract_attention_effect()), as the mean +- 1
-    SEM across subjects. Grey: where it differs from 0 (TFCE over time, two-tailed, p <= alpha; ranges less
-    than 10 ms apart joined); those time ranges are also printed with their smallest p."""
+    """The attention effect as one waveform: each subject's attend - ignore TRF, ROI-averaged and summed over
+    the frequency bins (extract_attention_effect()), as the mean +- 1 SEM across subjects. Grey: where it
+    differs from 0, tested as Brodbeck et al. 2020 tested their response functions: mass-univariate t-tests
+    from 0 ms to the end of the TRF, p values from the maximum statistic over that time range in the
+    permutations (two-tailed, p <= alpha; ranges less than 10 ms apart joined). Those ranges are printed."""
     import matplotlib.pyplot as plt
 
     difference = extract_attention_effect(data, attend_column, ignore_column, roi)
-    result = testnd.TTestOneSample(difference, tail=0, tfce=True, samples=ANALYSIS['samples'])
     times = difference.time.times * 1e3
     x = difference.get_data(('case', 'time'))
     mean = x.mean(0)
     sem = x.std(0, ddof=1) / numpy.sqrt(len(x))
-    p = result.p.get_data(('time',))
+    p = _max_statistic_p(difference)
     significant = p <= ANALYSIS['alpha']
 
     fig, ax = plt.subplots(figsize=(5, 2.8))
@@ -2194,10 +2208,12 @@ def plot_attention_effect(data, attend_column, ignore_column, title, roi=None):
     ax.set_title(title)
     ax.spines[['top', 'right']].set_visible(False)
     if ranges:
-        print(f"{title}: differs from 0 (TFCE, two-tailed; ranges < 10 ms apart joined) at " + '; '.join(
+        print(f"{title}: differs from 0 (max-statistic permutation test from 0 ms, two-tailed; ranges < 10 ms "
+              f"apart joined) at " + '; '.join(
             f"{a:.0f}-{b:.0f} ms (p {'< 0.001' if q < 0.001 else f'= {q:.3f}'})" for a, b, q in ranges))
     else:
-        print(f"{title}: no time range differs from 0 (TFCE, two-tailed, smallest p = {p.min():.3f})")
+        print(f"{title}: no time range differs from 0 (max-statistic permutation test from 0 ms, two-tailed, "
+              f"smallest p = {numpy.nanmin(p):.3f})")
     return fig
 
 
@@ -2205,7 +2221,9 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     """TRF of each frequency bin in its own colour (lowest dark, highest yellow) with a band of
     `error` ('sd' or 'sem' across subjects), the mean of the bins as a thick black line, and a key
     of the bins' centre frequencies on the right. `subtract` names a second column taken away
-    first, e.g. the ignore column for an attention effect (attend - ignore). The y axis fits the
+    first, e.g. the ignore column for an attention effect (attend - ignore); each bin is then drawn
+    bold where it differs from 0, faint elsewhere (mass-univariate t-tests over time x frequency from
+    0 ms, maximum-statistic correction, as Brodbeck et al. 2020 tested STRFs). The y axis fits the
     waveforms with their whole bands, so nothing is cut off."""
     import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
@@ -2214,12 +2232,20 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     times, freqs, mean, spread = _bin_stats(data, column, subtract, roi, error)
     n = len(freqs)
     colors = plt.colormaps['viridis'](numpy.linspace(0, 1, n))
+    significant = None
+    if subtract is not None:  # an attention effect: where each bin differs from 0, as in Brodbeck et al. 2020 Fig 3
+        p = _max_statistic_p(bin_trfs(data, column, subtract, roi))
+        significant = p <= ANALYSIS['alpha']
 
     fig, ax = plt.subplots(figsize=(5.5, 3))
     for k in range(n):
         ax.fill_between(times, mean[k] - spread[k], mean[k] + spread[k], color=colors[k], alpha=0.2, lw=0)
     for k in range(n):
-        ax.plot(times, mean[k], color=colors[k], lw=1.4)
+        if significant is None:
+            ax.plot(times, mean[k], color=colors[k], lw=1.4)
+        else:
+            ax.plot(times, mean[k], color=colors[k], lw=1.2, alpha=0.35)
+            ax.plot(times, numpy.where(significant[k], mean[k], numpy.nan), color=colors[k], lw=2)
     ax.plot(times, mean.mean(axis=0), color='black', lw=2.6, label=f'Mean of {n} bins')
     ax.axhline(0, color='black', lw=0.6)
     ax.axvline(0, color='black', lw=0.6)
@@ -2232,6 +2258,11 @@ def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     ax.set_title(title)
     ax.spines[['top', 'right']].set_visible(False)
     ax.legend(frameon=False, fontsize=8)
+    if significant is not None:
+        ax.text(0.99, 0.02, 'bold: differs from 0 (max-statistic test, time x frequency, from 0 ms)',
+                transform=ax.transAxes, ha='right', va='bottom', fontsize=6.5, color='0.35')
+        hits = [f"{freqs[k]:.0f} Hz" for k in range(n) if significant[k].any()]
+        print(f"{title}: bins that differ from 0 somewhere: {', '.join(hits) if hits else 'none'}")
 
     key = ScalarMappable(norm=BoundaryNorm(numpy.arange(n + 1), n), cmap=ListedColormap(colors))
     cbar = fig.colorbar(key, ax=ax, ticks=numpy.arange(n) + 0.5, fraction=0.06, pad=0.03, aspect=15)

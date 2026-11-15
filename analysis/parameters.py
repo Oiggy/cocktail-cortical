@@ -233,15 +233,17 @@ LABELS_MASKING = {'overt': 'Overt', 'masked': 'Masked'}
 COLORS_MASKING = {'overt': 'darkorange', 'masked': 'purple'}
 
 
-# Peak search windows. Each subject's peak is taken within +-25 ms of
+# Peak search windows, as Brodbeck et al. 2020: 20-200 ms for single-speaker
+# and stream-based (mixture/attended/ignored) responses, 20-250 ms for the
+# overt/masked onset analysis. Each subject's peak is taken within +-25 ms of
 # where the group-average waveform peaks inside the window
 # (add_anchored_peak).
-ONSET_POSITIVE_PEAK_WINDOW = (0.040, 0.200)
-ONSET_NEGATIVE_PEAK_WINDOW = (0.040, 0.200)
-ENVELOPE_POSITIVE_PEAK_WINDOW = (0.040, 0.200)
-ENVELOPE_NEGATIVE_PEAK_WINDOW = (0.040, 0.200)
-MASKED_POSITIVE_PEAK_WINDOW = (0.040, 0.200)
-MASKED_NEGATIVE_PEAK_WINDOW = (0.040, 0.200)
+ONSET_POSITIVE_PEAK_WINDOW = (0.020, 0.200)
+ONSET_NEGATIVE_PEAK_WINDOW = (0.020, 0.200)
+ENVELOPE_POSITIVE_PEAK_WINDOW = (0.020, 0.200)
+ENVELOPE_NEGATIVE_PEAK_WINDOW = (0.020, 0.200)
+MASKED_POSITIVE_PEAK_WINDOW = (0.020, 0.250)
+MASKED_NEGATIVE_PEAK_WINDOW = (0.020, 0.250)
 
 
 # Display settings (the fits are untouched)
