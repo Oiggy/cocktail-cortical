@@ -2150,6 +2150,57 @@ def _bin_stats(data, column, subtract=None, roi=None, error=None):
     return trf.time.times * 1e3, trf.frequency.values, mean, spread
 
 
+def plot_attention_effect(data, attend_column, ignore_column, title, roi=None):
+    """The attention effect as one waveform (Brodbeck et al. 2020, Fig 3 and 4 style): each subject's attend -
+    ignore TRF, ROI-averaged and summed over the frequency bins (extract_attention_effect()), as the mean +- 1
+    SEM across subjects. Grey: where it differs from 0 (TFCE over time, two-tailed, p <= alpha; ranges less
+    than 10 ms apart joined); those time ranges are also printed with their smallest p."""
+    import matplotlib.pyplot as plt
+
+    difference = extract_attention_effect(data, attend_column, ignore_column, roi)
+    result = testnd.TTestOneSample(difference, tail=0, tfce=True, samples=ANALYSIS['samples'])
+    times = difference.time.times * 1e3
+    x = difference.get_data(('case', 'time'))
+    mean = x.mean(0)
+    sem = x.std(0, ddof=1) / numpy.sqrt(len(x))
+    p = result.p.get_data(('time',))
+    significant = p <= ANALYSIS['alpha']
+
+    fig, ax = plt.subplots(figsize=(5, 2.8))
+    ranges = []  # (start ms, stop ms, smallest p); ranges less than 10 ms apart are joined
+    start = None
+    for k, flag in enumerate(numpy.append(significant, False)):
+        if flag and start is None:
+            start = k
+        elif not flag and start is not None:
+            if ranges and times[start] - ranges[-1][1] < 10:
+                a, _, q = ranges.pop()
+                ranges.append((a, times[k - 1], min(q, p[start:k].min())))
+            else:
+                ranges.append((times[start], times[k - 1], p[start:k].min()))
+            start = None
+    for a, b, _ in ranges:
+        ax.axvspan(a, b, color='0.85', lw=0, zorder=0)
+    ax.fill_between(times, mean - sem, mean + sem, color='purple', alpha=0.25, lw=0)
+    ax.plot(times, mean, color='purple', lw=2)
+    ax.axhline(0, color='black', lw=0.6)
+    ax.axvline(0, color='black', lw=0.6)
+    ax.set_xlim(*(numpy.array(ANALYSIS['plot_window']) * 1e3))
+    lo, hi = min((mean - sem).min(), 0), max((mean + sem).max(), 0)
+    margin = 0.08 * (hi - lo) or 1
+    ax.set_ylim(lo - margin, hi + margin)
+    ax.set_xlabel('Time [ms]')
+    ax.set_ylabel('Attend - ignore [normalized]')
+    ax.set_title(title)
+    ax.spines[['top', 'right']].set_visible(False)
+    if ranges:
+        print(f"{title}: differs from 0 (TFCE, two-tailed; ranges < 10 ms apart joined) at " + '; '.join(
+            f"{a:.0f}-{b:.0f} ms (p {'< 0.001' if q < 0.001 else f'= {q:.3f}'})" for a, b, q in ranges))
+    else:
+        print(f"{title}: no time range differs from 0 (TFCE, two-tailed, smallest p = {p.min():.3f})")
+    return fig
+
+
 def plot_trf_bins(data, column, title, subtract=None, roi=None, error=None):
     """TRF of each frequency bin in its own colour (lowest dark, highest yellow) with a band of
     `error` ('sd' or 'sem' across subjects), the mean of the bins as a thick black line, and a key
