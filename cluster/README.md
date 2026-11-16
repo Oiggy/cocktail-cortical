@@ -183,3 +183,17 @@ so it continues where it stopped.
 Inside the job, eelbrain uses exactly the cores the job was given
 (`experiment.py` reads `SLURM_CPUS_PER_TASK`), not every core on the
 node.
+
+## DTU dataset (converging evidence)
+
+A second, independent two-talker dataset, analysed with this project's forward models: Fuglsang, Dau &
+Hjortkjaer 2017, NeuroImage 156:435-444 (Zenodo 1199011). Everything stays on the cluster, in
+`dataset/dtu` next to `dataset/cocktail`. Driven from `analysis/dtu.ipynb`:
+
+1. `dtu_download()`: downloads it on the login node (compute nodes have no internet), about 20 GB.
+   `dtu_status()` follows it; `dtu_inspect()` reports the file layout.
+2. `dtu_run()`: `cluster/dtu_analysis.sbatch` runs `dtu/dtu_pipeline.py` in three steps: predictors and
+   EEG (one job), the TRF fits (one job per subject, in parallel), the group tests (one job).
+   `dtu_progress()` follows them.
+3. `dtu_all.ipynb` (all rooms pooled), `dtu_anechoic.ipynb`, `dtu_mild.ipynb` and `dtu_high.ipynb` read the
+   results: the same cells as `diotic.ipynb`.
