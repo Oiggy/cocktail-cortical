@@ -1472,7 +1472,8 @@ def check_alignment(poll=30):
 # 1199011). Kept on the cluster in dataset/dtu, next to dataset/cocktail (dtu/).
 
 def _dtu_folder():
-    return f"{shlex.quote(str(Path(_setting('cluster_repo')).parent))}/dataset/dtu"
+    "The DTU dataset folder on the cluster, as an absolute path for a shell command"
+    return f"\"$HOME\"/{shlex.quote(str(Path(_setting('cluster_repo')).parent))}/dataset/dtu"
 
 
 def dtu_download():
@@ -1509,7 +1510,10 @@ def dtu_status(lines=25):
     "The end of the DTU download's log on the cluster, and whether it is still running"
     folder = _dtu_folder()
     command = (f"pgrep -u \"$USER\" -f '^bash [d]tu/download[.]sh' >/dev/null && echo '(still running)' || echo '(not running)'; "
-               f"tail -n {int(lines)} {folder}/download.log 2>/dev/null || echo 'No download started yet.'")
+               # an earlier version wrote the log inside the repo folder by mistake
+               f"stray=\"$HOME\"/{shlex.quote(_setting('cluster_repo'))}/{shlex.quote(str(Path(_setting('cluster_repo')).parent))}/dataset/dtu; "
+               f"log={folder}/download.log; [ -f \"$log\" ] || log=\"$stray/download.log\"; "
+               f"tail -n {int(lines)} \"$log\" 2>/dev/null || echo 'No download started yet.'")
     print(_cluster(f"bash -lc {shlex.quote(command)}").stdout.decode().rstrip())
 
 
