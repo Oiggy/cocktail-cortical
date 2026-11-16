@@ -88,6 +88,11 @@ def preprocess():
 # '' = attended speaker, 'bg~' = ignored speaker, 'mix~' = the mixture.
 FULL_CLEAN = f"{envelope(ATTEND)} + {onset(ATTEND)}"
 FULL_BASE = f"{envelope(ATTEND)} + {onset(ATTEND)} + {envelope(IGNORE)} + {onset(IGNORE)} + {envelope(MIX)} + {onset(MIX)}"
+# Stream-level tests: one stream (its envelope + onsets) removed from FULL_BASE
+# at once. Does the brain track that talker (or the mixture) at all?
+FULL_BASE_NO_ATTEND_STREAM = f"{envelope(IGNORE)} + {onset(IGNORE)} + {envelope(MIX)} + {onset(MIX)}"
+FULL_BASE_NO_IGNORE_STREAM = f"{envelope(ATTEND)} + {onset(ATTEND)} + {envelope(MIX)} + {onset(MIX)}"
+FULL_BASE_NO_MIX_STREAM = f"{envelope(ATTEND)} + {onset(ATTEND)} + {envelope(IGNORE)} + {onset(IGNORE)}"
 # The overt/masked notebooks (predictors/brodbeck2020_predictors.py): the
 # overt/masked split is made element-wise at full frequency resolution and
 # only then binned into 8 bands, with each speaker at the level it has in the
