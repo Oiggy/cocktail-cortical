@@ -1476,12 +1476,50 @@ def _dtu_folder():
     return f"\"$HOME\"/{shlex.quote(str(Path(_setting('cluster_repo')).parent))}/dataset/dtu"
 
 
-def dtu_download():
-    """Start downloading the DTU dataset into dataset/dtu on the cluster (dtu/download.sh, ~20 GB).
-    Runs in the background on the cluster's login node (compute nodes have no internet), so the notebook
-    and the Mac can be closed; follow it with dtu_status(). Safe to call again: it resumes."""
+def _dtu_state():
+    """What is already done for the DTU dataset on the cluster, read in one go: download running/complete,
+    inspection report, DTU jobs queued or running, predictors/EEG made, subjects fitted, group tests done"""
+    folder = _dtu_folder()
+    script = '\n'.join([
+        f'd={folder}',
+        'pgrep -u "$USER" -f \'^bash [d]tu/download[.]sh\' >/dev/null && echo download_running=1',
+        'n=$(ls "$d"/S*_data_preproc.mat 2>/dev/null | wc -l); w=$(ls "$d"/*.wav 2>/dev/null | wc -l)',
+        '[ "$n" -ge 18 ] && [ "$w" -gt 0 ] && [ -e "$d/raw/.done-EEG.zip" ] && [ -e "$d/raw/.done-AUDIO.zip" ] '
+        '&& echo download_complete=1',
+        '[ -s "$d/inspect_report.txt" ] && ! grep -q "Not there yet" "$d/inspect_report.txt" && echo inspected=1',
+        'echo "jobs=$(squeue -u "${USER:-$(whoami)}" -h -o "%j" 2>/dev/null | grep "^cocktail-dtu" | sort -u | tr "\\n" " ")"',
+        '[ -s "$d/derivatives/prepare_report.txt" ] && echo prepared=1',
+        'echo "fitted=$(for f in "$d"/derivatives/fits/S*/DONE; do [ -e "$f" ] && basename "$(dirname "$f")" | tr -d S; done | tr "\\n" " ")"',
+        'r="$d/derivatives/results/DONE"; if [ -e "$r" ] && [ -z "$(find "$d/derivatives/fits" -name DONE -newer "$r" 2>/dev/null)" ]; '
+        'then echo stats_done=1; fi',
+    ])
+    out = _cluster(f"bash -lc {shlex.quote(script)}").stdout.decode()
+    state = dict(line.split('=', 1) for line in out.splitlines() if '=' in line)
+    return {
+        'download_running': 'download_running' in state,
+        'download_complete': 'download_complete' in state,
+        'inspected': 'inspected' in state,
+        'jobs': state.get('jobs', '').split(),
+        'prepared': 'prepared' in state,
+        'fitted': sorted(int(s) for s in state.get('fitted', '').split()),
+        'stats_done': 'stats_done' in state,
+    }
+
+
+def dtu_download(force=False):
+    """Download the DTU dataset into dataset/dtu on the cluster (dtu/download.sh, ~20 GB), in the background on
+    the cluster's login node (compute nodes have no internet), so the notebook and the Mac can be closed.
+    Does nothing if it is already downloaded or downloading, so Run All is safe; force=True checks every file
+    again (it still skips the finished ones)."""
     if ANALYSIS['results_mode'] == 'compute':
         print("Inside a cluster job: skipped.")
+        return
+    state = _dtu_state()
+    if state['download_running']:
+        print("The download is already running on the cluster; follow it with dtu_status().")
+        return
+    if state['download_complete'] and not force:
+        print("Already downloaded to the cluster (dataset/dtu): nothing to do.")
         return
     if _on_cluster():
         print("JupyterHub runs on a compute node, which has no internet. Start the download from a login node "
@@ -1491,15 +1529,12 @@ def dtu_download():
         return
     folder = _dtu_folder()
     command = (
-        f"if pgrep -u \"$USER\" -f '^bash [d]tu/download[.]sh' >/dev/null; then echo RUNNING; exit 0; fi; "
         f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main && "
         f"mkdir -p {folder} && (setsid nohup bash dtu/download.sh > {folder}/download.log 2>&1 < /dev/null &) && "
         f"echo STARTED")
     proc = _cluster(f"bash -lc {shlex.quote(command)}")
     out = proc.stdout.decode().strip()
-    if 'RUNNING' in out:
-        print("The download is already running on the cluster; follow it with dtu_status().")
-    elif 'STARTED' in out:
+    if 'STARTED' in out:
         print("Started the download on the cluster's login node (about 20 GB; it carries on with the Mac closed). "
               "Follow it with dtu_status(); when it says DOWNLOAD COMPLETE, run dtu_inspect().")
     else:
@@ -1517,12 +1552,24 @@ def dtu_status(lines=25):
     print(_cluster(f"bash -lc {shlex.quote(command)}").stdout.decode().rstrip())
 
 
-def dtu_inspect(poll=30):
+def dtu_inspect(poll=30, force=False):
     """Report how the downloaded DTU dataset is laid out (dtu/inspect_dtu.py, a short cluster job): its
-    folders, the fields of one subject's EEG files, the trial table and the audio. Submits it, waits and
-    prints the report (also kept as dataset/dtu/inspect_report.txt on the cluster)."""
+    folders, the fields of one subject's EEG files, the trial table and the audio. If the report already
+    exists it is shown again without a new job (force=True makes a new one)."""
     if ANALYSIS['results_mode'] == 'compute':
         print("Inside a cluster job: skipped.")
+        return
+    state = _dtu_state()
+    report = f"{_dtu_folder()}/inspect_report.txt"
+    if state['inspected'] and not force:
+        print("(the report made earlier; dtu_inspect(force=True) makes a new one)")
+        print(_cluster(f"bash -lc {shlex.quote(f'cat {report}')}").stdout.decode().rstrip())
+        return
+    if not state['download_complete']:
+        print("The dataset is not (completely) downloaded yet: run dtu_download() and wait for DOWNLOAD COMPLETE.")
+        return
+    if any(job == 'cocktail-dtu-inspect' for job in state['jobs']):
+        print("The inspection job is already queued or running; run this cell again in a few minutes.")
         return
     update = '' if _on_cluster() else 'git pull -q --no-rebase --no-edit origin main && '
     command = (f"cd {shlex.quote(_setting('cluster_repo'))} && {update}"
@@ -1557,27 +1604,61 @@ def _dtu_sbatch(args, script='cluster/dtu_analysis.sbatch'):
     return re.match(r'^(\d+)', out)[1]
 
 
-def dtu_run():
+def dtu_run(force=False):
     """Run the DTU forward-model analysis on the cluster (dtu/dtu_pipeline.py): one job makes the predictors and
-    EEG, 18 jobs (one per subject, in parallel) fit the TRFs, one job runs the group tests. Hours, not minutes;
-    the Mac can be closed. Follow it with dtu_progress(). Safe to run again: finished fits are kept."""
+    EEG, one job per subject (in parallel) fits the TRFs, one job runs the group tests. Hours, not minutes; the
+    Mac can be closed. Follow it with dtu_progress().
+
+    Submits only what is missing, so Run All is safe: nothing if the results are complete or the jobs are
+    already queued or running; otherwise the predictors/EEG only if not made yet, the fits only of subjects
+    not finished, and the group tests. force=True redoes the predictors/EEG and the group tests (finished
+    fits are still kept)."""
     if ANALYSIS['results_mode'] == 'compute':
         print("Inside a cluster job: skipped.")
+        return
+    state = _dtu_state()
+    running = [job for job in state['jobs'] if job in ('cocktail-dtu-prepare', 'cocktail-dtu-fit', 'cocktail-dtu-stats')]
+    if running:
+        print(f"The DTU analysis is already queued or running on the cluster ({', '.join(running)}); "
+              f"follow it with dtu_progress().")
+        return
+    if not state['download_complete']:
+        print("The dataset is not (completely) downloaded yet: run dtu_download() first.")
+        return
+    todo = [s for s in range(1, 19) if s not in state['fitted']]
+    if state['prepared'] and not todo and state['stats_done'] and not force:
+        print("The DTU analysis is complete: open dtu_all.ipynb (and dtu_anechoic, dtu_mild, dtu_high). "
+              "dtu_run(force=True) would redo the predictors/EEG and group tests.")
         return
     if not _on_cluster():
         update = f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main"
         proc = _cluster(f"bash -lc {shlex.quote(update)}")
         if proc.returncode:
             raise RuntimeError(f"Updating the cluster's copy of the repo failed:\n{proc.stderr.decode()}")
-    prepare = _dtu_sbatch("--export=ALL,STAGE=prepare --job-name=cocktail-dtu-prepare "
-                          "--cpus-per-task=32 --mem=96G --time=08:00:00")
-    fit = _dtu_sbatch(f"--export=ALL,STAGE=fit --job-name=cocktail-dtu-fit --array=1-18 "
-                      f"--cpus-per-task=8 --mem=32G --time=2-00:00:00 --dependency=afterok:{prepare}")
+    submitted, after = [], None
+    if not state['prepared'] or force:
+        if force:
+            _cluster(f"bash -lc {shlex.quote(f'rm -f {_dtu_folder()}/derivatives/prepare_report.txt')}")
+        after = _dtu_sbatch("--export=ALL,STAGE=prepare --job-name=cocktail-dtu-prepare "
+                            "--cpus-per-task=32 --mem=96G --time=08:00:00")
+        submitted.append(f"predictors and EEG (job {after})")
+    if todo:
+        dependency = f" --dependency=afterok:{after}" if after else ''
+        after = _dtu_sbatch(f"--export=ALL,STAGE=fit --job-name=cocktail-dtu-fit --array={','.join(map(str, todo))} "
+                            f"--cpus-per-task=8 --mem=32G --time=2-00:00:00{dependency}")
+        submitted.append(f"the TRF fits of {len(todo)} subject{'s' if len(todo) > 1 else ''} (job {after})")
+    dependency = f" --dependency=afterany:{after}" if after else ''
     stats = _dtu_sbatch(f"--export=ALL,STAGE=stats --job-name=cocktail-dtu-stats "
-                        f"--cpus-per-task=8 --mem=32G --time=06:00:00 --dependency=afterany:{fit}")
-    print(f"Submitted: predictors and EEG (job {prepare}), then the TRF fits of the 18 subjects (job {fit}), then "
-          f"the group tests (job {stats}). Follow them with dtu_progress(); the notebooks dtu_all.ipynb, "
-          f"dtu_anechoic.ipynb, dtu_mild.ipynb and dtu_high.ipynb read the results once job {stats} is done.")
+                        f"--cpus-per-task=8 --mem=32G --time=06:00:00{dependency}")
+    submitted.append(f"the group tests (job {stats})")
+    skipped = []
+    if state['prepared'] and not force:
+        skipped.append("predictors and EEG")
+    if state['fitted']:
+        skipped.append(f"fits of {len(state['fitted'])} subjects")
+    print("Submitted " + ", then ".join(submitted) + "." + (f" Already done, kept: {', '.join(skipped)}." if skipped else ''))
+    print("Follow them with dtu_progress(); dtu_all.ipynb and the room notebooks read the results once the group "
+          "tests are done.")
 
 
 def dtu_progress():

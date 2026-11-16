@@ -336,6 +336,8 @@ def fit(subject):
                 done['h'] = {h.name: h for h in res.h}
             save(done, path)
             log(f"S{subject} {epoch} {model}: r = {float(res.r.mean()):.4f} ({time.time() - started:.0f} s)")
+    # Marker read by dtu_run() in the notebook: this subject needs no more fitting
+    (FIT_DIR / f'S{subject}' / 'DONE').write_text(time.strftime('%F %T') + '\n')
     log(f"S{subject} done")
 
 
@@ -379,6 +381,7 @@ def stats(samples=10000):
               'n_trials': {f'S{s}': loaded[s]['n_trials'] for s in subjects}}, RESULT_DIR / f'{epoch}.pickle')
         summary[epoch] = {'subjects': len(subjects), 'roi': roi}
     (RESULT_DIR / 'summary.json').write_text(json.dumps(summary, indent=1))
+    (RESULT_DIR / 'DONE').write_text(time.strftime('%F %T') + '\n')  # read by dtu_run()
     log("stats done")
 
 
