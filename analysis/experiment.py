@@ -1467,6 +1467,78 @@ def check_alignment(poll=30):
     print(_job_log(job, 1000))
 
 
+# A second dataset for converging evidence: Fuglsang, Dau & Hjortkjaer 2017 (NeuroImage
+# 156:435-444), the DTU EEG and audio dataset for auditory attention decoding (Zenodo
+# 1199011). Kept on the cluster in dataset/dtu, next to dataset/cocktail (dtu/).
+
+def _dtu_folder():
+    return f"{shlex.quote(str(Path(_setting('cluster_repo')).parent))}/dataset/dtu"
+
+
+def dtu_download():
+    """Start downloading the DTU dataset into dataset/dtu on the cluster (dtu/download.sh, ~20 GB).
+    Runs in the background on the cluster's login node (compute nodes have no internet), so the notebook
+    and the Mac can be closed; follow it with dtu_status(). Safe to call again: it resumes."""
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
+    if _on_cluster():
+        print("JupyterHub runs on a compute node, which has no internet. Start the download from a login node "
+              "instead: ssh to the cluster and, from the repo folder, run\n"
+              "    mkdir -p ../dataset/dtu && nohup bash dtu/download.sh > ../dataset/dtu/download.log 2>&1 &\n"
+              "then follow it here with dtu_status().")
+        return
+    folder = _dtu_folder()
+    command = (
+        f"if pgrep -u \"$USER\" -f dtu/download.sh >/dev/null; then echo RUNNING; exit 0; fi; "
+        f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main && "
+        f"mkdir -p {folder} && (setsid nohup bash dtu/download.sh > {folder}/download.log 2>&1 < /dev/null &) && "
+        f"echo STARTED")
+    proc = _cluster(f"bash -lc {shlex.quote(command)}")
+    out = proc.stdout.decode().strip()
+    if 'RUNNING' in out:
+        print("The download is already running on the cluster; follow it with dtu_status().")
+    elif 'STARTED' in out:
+        print("Started the download on the cluster's login node (about 20 GB; it carries on with the Mac closed). "
+              "Follow it with dtu_status(); when it says DOWNLOAD COMPLETE, run dtu_inspect().")
+    else:
+        raise RuntimeError(f"Starting the download failed:\n{out}\n{proc.stderr.decode()}")
+
+
+def dtu_status(lines=25):
+    "The end of the DTU download's log on the cluster, and whether it is still running"
+    folder = _dtu_folder()
+    command = (f"pgrep -u \"$USER\" -f dtu/download.sh >/dev/null && echo '(still running)' || echo '(not running)'; "
+               f"tail -n {int(lines)} {folder}/download.log 2>/dev/null || echo 'No download started yet.'")
+    print(_cluster(f"bash -lc {shlex.quote(command)}").stdout.decode().rstrip())
+
+
+def dtu_inspect(poll=30):
+    """Report how the downloaded DTU dataset is laid out (dtu/inspect_dtu.py, a short cluster job): its
+    folders, the fields of one subject's EEG files, the trial table and the audio. Submits it, waits and
+    prints the report (also kept as dataset/dtu/inspect_report.txt on the cluster)."""
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
+    update = '' if _on_cluster() else 'git pull -q --no-rebase --no-edit origin main && '
+    command = (f"cd {shlex.quote(_setting('cluster_repo'))} && {update}"
+               f"sbatch --account={shlex.quote(_setting('cluster_account'))} cluster/dtu_inspect.sbatch")
+    proc = _cluster(f"bash -lc {shlex.quote(command)}")
+    out = proc.stdout.decode() + proc.stderr.decode()
+    job = re.search(r'Submitted batch job (\d+)', out)
+    if proc.returncode or not job:
+        raise RuntimeError(f"Submitting the DTU inspection failed:\n{out}")
+    job = job[1]
+    print(f"Submitted the DTU inspection as job {job}; waiting for it (usually a few minutes).")
+    try:
+        while _cluster(f"bash -lc 'squeue -h -j {int(job)} -o %T'").stdout.decode().strip():
+            time.sleep(poll)
+    except KeyboardInterrupt:
+        print(f"Stopped waiting. Job {job} keeps running; see its report later with cluster_log({job}, 1000).")
+        return
+    print(_job_log(job, 1000))
+
+
 # Files made by code that has since been replaced (relative to the dataset's
 # cocktail folder): the in-mixture overt/masked onsets of the replaced
 # predictors/inmix_onsets.py, and its 128-band per-ear spectrogram caches.
