@@ -1490,7 +1490,7 @@ def dtu_download():
         return
     folder = _dtu_folder()
     command = (
-        f"if pgrep -u \"$USER\" -f '[d]tu/download[.]sh' >/dev/null; then echo RUNNING; exit 0; fi; "
+        f"if pgrep -u \"$USER\" -f '^bash [d]tu/download[.]sh' >/dev/null; then echo RUNNING; exit 0; fi; "
         f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main && "
         f"mkdir -p {folder} && (setsid nohup bash dtu/download.sh > {folder}/download.log 2>&1 < /dev/null &) && "
         f"echo STARTED")
@@ -1508,7 +1508,7 @@ def dtu_download():
 def dtu_status(lines=25):
     "The end of the DTU download's log on the cluster, and whether it is still running"
     folder = _dtu_folder()
-    command = (f"pgrep -u \"$USER\" -f '[d]tu/download[.]sh' >/dev/null && echo '(still running)' || echo '(not running)'; "
+    command = (f"pgrep -u \"$USER\" -f '^bash [d]tu/download[.]sh' >/dev/null && echo '(still running)' || echo '(not running)'; "
                f"tail -n {int(lines)} {folder}/download.log 2>/dev/null || echo 'No download started yet.'")
     print(_cluster(f"bash -lc {shlex.quote(command)}").stdout.decode().rstrip())
 
