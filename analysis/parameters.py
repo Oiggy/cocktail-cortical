@@ -184,6 +184,7 @@ TEST_REGION = {
     'clean': 'whole_scalp',
     'diotic': 'roi',
     'diotic_overt_masked_onsets': 'roi',
+    'dichotic': 'roi',
     'dichotic_left': 'roi',
     'dichotic_left_overt_masked_onsets': 'roi',
     'dichotic_right': 'roi',
