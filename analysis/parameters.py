@@ -40,7 +40,7 @@ from experiment import (
     compute_unique_contribution, compute_direct_comparison, show_topomap_trio, show_subject_swarm,
     load_trfs_saved, extract_strf, extract_trf, extract_attention_effect, add_anchored_peak,
     print_peak_table, plot_trf_bins, plot_attention_effect, submit_cluster_run, cluster_queue, cluster_log, check_results, ResultsNotReady, ClusterConnectionError, find_roi, show_roi_file, show_roi, check_alignment, cluster_cleanup, tfce_summary,
-    dtu_download, dtu_status, dtu_inspect,
+    dtu_download, dtu_status, dtu_inspect, dtu_run, dtu_progress, dtu_setup, dtu_model_test, dtu_trfs,
 )
 import matplotlib.pyplot as plt
 import numpy

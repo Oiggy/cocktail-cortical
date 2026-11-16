@@ -1543,6 +1543,104 @@ def dtu_inspect(poll=30):
     print(_job_log(job, 1000))
 
 
+DTU_EPOCHS = ('all', 'anechoic', 'mild', 'high')
+
+
+def _dtu_sbatch(args, script='cluster/dtu_analysis.sbatch'):
+    "Submit a DTU job (sbatch `args` `script`) from the cluster's copy of the repo; its job ID"
+    command = (f"cd {shlex.quote(_setting('cluster_repo'))} && "
+               f"sbatch --parsable --account={shlex.quote(_setting('cluster_account'))} {args} {script}")
+    proc = _cluster(f"bash -lc {shlex.quote(command)}")
+    out = proc.stdout.decode().strip()
+    if proc.returncode or not re.match(r'^\d+', out):
+        raise RuntimeError(f"Submitting a DTU job failed:\n{out}\n{proc.stderr.decode()}")
+    return re.match(r'^(\d+)', out)[1]
+
+
+def dtu_run():
+    """Run the DTU forward-model analysis on the cluster (dtu/dtu_pipeline.py): one job makes the predictors and
+    EEG, 18 jobs (one per subject, in parallel) fit the TRFs, one job runs the group tests. Hours, not minutes;
+    the Mac can be closed. Follow it with dtu_progress(). Safe to run again: finished fits are kept."""
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
+    if not _on_cluster():
+        update = f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main"
+        proc = _cluster(f"bash -lc {shlex.quote(update)}")
+        if proc.returncode:
+            raise RuntimeError(f"Updating the cluster's copy of the repo failed:\n{proc.stderr.decode()}")
+    prepare = _dtu_sbatch("--export=ALL,STAGE=prepare --job-name=cocktail-dtu-prepare "
+                          "--cpus-per-task=32 --mem=96G --time=08:00:00")
+    fit = _dtu_sbatch(f"--export=ALL,STAGE=fit --job-name=cocktail-dtu-fit --array=1-18 "
+                      f"--cpus-per-task=8 --mem=32G --time=2-00:00:00 --dependency=afterok:{prepare}")
+    stats = _dtu_sbatch(f"--export=ALL,STAGE=stats --job-name=cocktail-dtu-stats "
+                        f"--cpus-per-task=8 --mem=32G --time=06:00:00 --dependency=afterany:{fit}")
+    print(f"Submitted: predictors and EEG (job {prepare}), then the TRF fits of the 18 subjects (job {fit}), then "
+          f"the group tests (job {stats}). Follow them with dtu_progress(); the notebooks dtu_all.ipynb, "
+          f"dtu_anechoic.ipynb, dtu_mild.ipynb and dtu_high.ipynb read the results once job {stats} is done.")
+
+
+def dtu_progress():
+    "The DTU analysis jobs still queued or running, how many subject fits are done, and the predictor/EEG report"
+    folder = _dtu_folder()
+    script = '\n'.join([
+        'me="${USER:-$(whoami)}"',
+        'echo "Jobs:"; squeue -u "$me" -h -o "  %i %j %T %M" | awk \'$2 ~ /^cocktail-dtu/\' || true',
+        f'echo; echo "Predictors and EEG:"; cat {folder}/derivatives/prepare_report.txt 2>/dev/null | sed "s/^/  /" '
+        '|| echo "  not made yet"',
+        f'echo; echo "Fits done (subject: epochs):"; for d in {folder}/derivatives/fits/S*; do [ -d "$d" ] && '
+        'echo "  $(basename "$d"): $(ls "$d" | grep -v part | sed "s/.pickle//" | tr "\\n" " ")"; done',
+        f'echo; echo "Group results:"; ls {folder}/derivatives/results/*.pickle 2>/dev/null | xargs -n1 basename '
+        '| sed "s/^/  /" || echo "  none yet"',
+    ])
+    print(_cluster(f"bash -lc {shlex.quote(script)}").stdout.decode().rstrip())
+
+
+def _dtu_results(epoch):
+    "The DTU group results for `epoch` (dtu_pipeline.py stats), read from the cluster once per session"
+    if epoch not in DTU_EPOCHS:
+        raise ValueError(f"epoch={epoch!r}; choose from {DTU_EPOCHS}")
+    key = f'dtu-{epoch}'
+    if key not in _remote_results:
+        path = f"{_dtu_folder()}/derivatives/results/{epoch}.pickle"
+        if _on_cluster() or ANALYSIS['results_mode'] == 'compute':
+            local = Path.home() / Path(_setting('cluster_repo')).parent / 'dataset' / 'dtu' / 'derivatives' / 'results' / f'{epoch}.pickle'
+            data = local.read_bytes() if local.exists() else None
+        else:
+            proc = _cluster(f"bash -lc {shlex.quote(f'if [ -f {path} ]; then cat {path}; else exit 3; fi')}")
+            data = None if proc.returncode == 3 else proc.stdout
+        if not data:
+            raise FileNotFoundError(f"No DTU results for {epoch!r} on the cluster yet: run dtu_run() in dtu.ipynb "
+                                    f"and wait for its last job (dtu_progress()).")
+        _remote_results[key] = pickle.loads(data)
+    return _remote_results[key]
+
+
+def dtu_setup(epoch):
+    """Read the DTU results for `epoch` and set this notebook's ROI (the clean-speech ROI of this project, roi.txt)
+    and test region; prints how many subjects and trials went in. Returns the ROI."""
+    res = _dtu_results(epoch)
+    configure_analysis(roi=res['roi'], test_region='roi')
+    trials = sorted(set(res['n_trials'].values()))
+    print(f"DTU {epoch}: {res['n_subjects']} subjects, {'/'.join(map(str, trials))} trials of 50 s each.")
+    print(f"ROI ({len(res['roi'])} sensors, from this project's clean-speech notebook, roi.txt): {', '.join(res['roi'])}")
+    return res['roi']
+
+
+def dtu_model_test(label, epoch, metric='r'):
+    "One DTU model comparison (full model vs. without `label`), as (data, diff, result) like compute_unique_contribution()"
+    res = _dtu_results(epoch)
+    data, result = res['tests'][label]
+    diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
+    diff[f'roi_{metric}'] = diff[metric].mean(sensor=res['roi'])
+    return data, diff, result
+
+
+def dtu_trfs(epoch):
+    "All DTU subjects' full-model TRFs for `epoch`, with the same columns as load_trfs_saved(FULL_BASE, ...)"
+    return _dtu_results(epoch)['trfs']
+
+
 # Files made by code that has since been replaced (relative to the dataset's
 # cocktail folder): the in-mixture overt/masked onsets of the replaced
 # predictors/inmix_onsets.py, and its 128-band per-ear spectrogram caches.
