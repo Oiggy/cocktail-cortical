@@ -1688,6 +1688,19 @@ def dtu_progress():
     print(_cluster(f"bash -lc {shlex.quote(script)}").stdout.decode().rstrip())
 
 
+def dtu_single_talker():
+    """What the DTU single-talker trials played (they define the DTU ROI), and whether any sound other than the two
+    talkers' stories is speech (its length and syllable-rate envelope modulation, next to a story's). Read-only;
+    runs on the login node in about a minute."""
+    root = Path(_setting('cluster_repo')).parent
+    command = (f"cd {shlex.quote(_setting('cluster_repo'))} && "
+               + ("" if _on_cluster() else "git pull -q --no-rebase --no-edit origin main && ")
+               + f"MAMBA_ROOT_PREFIX=\"$HOME/{root}/micromamba\" \"$HOME/{root}/bin/micromamba\" run -n cocktail-cortical "
+               f"python dtu/single_talker.py")
+    proc = _cluster(f"bash -lc {shlex.quote(command)}")
+    print((proc.stdout.decode() + proc.stderr.decode()[-2000:]).rstrip())
+
+
 def _dtu_results(epoch):
     "The DTU group results for `epoch` (dtu_pipeline.py stats), read from the cluster once per session"
     if epoch not in DTU_EPOCHS:
