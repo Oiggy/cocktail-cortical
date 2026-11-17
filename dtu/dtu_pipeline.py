@@ -173,6 +173,32 @@ def _story_envelope(name):
 
 # ---------------------------------------------------------------------------------------------- trial table
 
+def _accept_old_tables():
+    """Let mat-io read MATLAB tables saved before R2018a. mat-io's converter expects the 'versionSavedFrom' field
+    newer tables carry; the DTU trial tables (2018, older format) lack it but have the same 'data', 'nvars' and
+    'varnames', from which mat-io's own to_dataframe() builds the table."""
+    from matio.utils import matconvert
+    from matio.utils.converters import mattables
+    original = mattables.mat_to_table
+    if getattr(matconvert.MAT_TO_PY['table'], 'accepts_old_tables', False):
+        return
+
+    def mat_to_table(props, add_table_attrs=False, **kwargs):
+        attrs = props.get('props') if hasattr(props, 'get') else None
+        names = getattr(getattr(attrs, 'dtype', None), 'names', None) or ()
+        if 'versionSavedFrom' in names:
+            return original(props, add_table_attrs=add_table_attrs, **kwargs)
+        try:
+            return mattables.to_dataframe(props['data'], int(numpy.asarray(props['nvars']).ravel()[0]), props['varnames'])
+        except Exception as error:
+            keys = list(props.keys()) if hasattr(props, 'keys') else type(props).__name__
+            raise ValueError(f"old-format MATLAB table not readable ({type(error).__name__}: {error}); "
+                             f"its fields: {keys}") from error
+
+    mat_to_table.accepts_old_tables = True
+    matconvert.MAT_TO_PY['table'] = mat_to_table
+
+
 def _expinfo(subject, why=None):
     """The trial table of S<subject>.mat as a list of dicts, or None. It is a MATLAB table object, which only
     mat-io reads (installed by dtu/download.sh). `why`: a list that collects the reason it could not be read."""
@@ -182,6 +208,7 @@ def _expinfo(subject, why=None):
     except ImportError:
         why.append("mat-io is not installed in the cocktail-cortical environment")
         return None
+    _accept_old_tables()
     path = DTU / f'S{subject}.mat'
     try:
         mat = load_from_mat(str(path), variable_names=['expinfo'])
