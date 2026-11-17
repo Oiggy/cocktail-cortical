@@ -154,12 +154,14 @@ def _story_envelope(name):
 
 # ---------------------------------------------------------------------------------------------- trial table
 
-def _expinfo(subject):
+def _expinfo(subject, why=None):
     """The trial table of S<subject>.mat as a list of dicts, or None. It is a MATLAB table object, which only
-    mat-io reads (installed by dtu/download.sh)."""
+    mat-io reads (installed by dtu/download.sh). `why`: a list that collects the reason it could not be read."""
+    why = why if why is not None else []
     try:
         from matio import load_from_mat
     except ImportError:
+        why.append("mat-io is not installed in the cocktail-cortical environment")
         return None
     path = DTU / f'S{subject}.mat'
     try:
@@ -167,10 +169,13 @@ def _expinfo(subject):
     except TypeError:
         mat = load_from_mat(str(path))
     except Exception as error:
+        why.append(f"mat-io could not read S{subject}.mat ({type(error).__name__}: {error})")
         log(f"  S{subject}: expinfo not readable ({type(error).__name__}: {error})")
         return None
     table = mat.get('expinfo') if isinstance(mat, dict) else None
     if table is None:
+        keys = sorted(k for k in mat if not k.startswith('__')) if isinstance(mat, dict) else type(mat).__name__
+        why.append(f"no variable 'expinfo' in S{subject}.mat (variables: {keys})")
         return None
     try:
         import pandas
@@ -178,6 +183,7 @@ def _expinfo(subject):
             table = pandas.DataFrame(table)
         return table.to_dict('records')
     except Exception as error:
+        why.append(f"expinfo is a {type(table).__name__}, not a table ({type(error).__name__}: {error}): {str(table)[:300]}")
         log(f"  S{subject}: expinfo in an unexpected form ({type(error).__name__}: {error})")
         return None
 
@@ -283,7 +289,7 @@ def prepare():
         line = (f"S{subject}: {n_trials} trials; stories matched by envelope (lowest r {min(min(r[5], r[6]) for r in ds_rows):.2f}"
                 f"{f', {weak} weak' if weak else ''}); "
                 + (f"trial table agrees on {agree}/{n_trials} attended stories; rooms "
-                    f"{dict(zip(*numpy.unique(list(ds['room']), return_counts=True)))}" if rows else "no trial table: rooms unknown")
+                    f"{ {str(k): int(v) for k, v in zip(*numpy.unique(list(ds['room']), return_counts=True))} }" if rows else "no trial table: rooms unknown")
                 + f"; reference: {ds.info['reference']}")
         log(line)
         report.append(line)
@@ -294,6 +300,62 @@ def prepare():
             pass
     (DERIV / 'prepare_report.txt').write_text('\n'.join(report) + '\n')
     log("prepare done")
+
+
+# ---------------------------------------------------------------------------------------------- rooms
+
+def _two_talker_rows(info, n_trials, why):
+    rows = [row for row in info if _number(row.get('n_speakers')) == 2] or \
+           [row for row in info if _text(row.get('wavfile_female')) and _text(row.get('wavfile_male'))]
+    if len(rows) != n_trials:
+        why.append(f"{len(rows)} two-talker rows in expinfo but {n_trials} trials")
+        return None
+    return rows
+
+
+def rooms():
+    """Add the rooms (and attended side) from the trial table to subjects prepared without them, without
+    remaking their EEG or predictors. Subjects that get rooms lose their DONE marker, so the next fit adds the
+    room fits (the all-rooms fits are kept). Writes rooms_report.txt; says exactly why if the table is unreadable."""
+    from eelbrain import Factor
+    report = []
+    try:
+        import matio
+        report.append(f"mat-io {getattr(matio, '__version__', '')} is installed")
+    except ImportError:
+        report.append("mat-io is NOT installed")
+    try:
+        from scipy.io import whosmat
+        report.append(f"S1.mat variables: {[(n, s, c) for n, s, c in whosmat(DTU / 'S1.mat')]}")
+    except Exception as error:
+        report.append(f"S1.mat variables: not listable ({type(error).__name__}: {error})")
+    for subject in SUBJECTS:
+        path = SUBJ_DIR / f'S{subject}.pickle'
+        if not path.exists():
+            report.append(f"S{subject}: not prepared yet")
+            continue
+        ds = load(path)
+        why = []
+        info = _expinfo(subject, why)
+        rows = _two_talker_rows(info, ds.n_cases, why) if info else None
+        if rows is None:
+            report.append(f"S{subject}: no rooms: {'; '.join(why)}")
+            continue
+        agree = sum(_text(row.get('wavfile_male' if _number(row.get('attend_mf')) == 1 else 'wavfile_female')) == attended
+                    for row, attended in zip(rows, ds['attended']))
+        if agree < 0.9 * ds.n_cases:
+            report.append(f"S{subject}: trial table agrees on only {agree}/{ds.n_cases} attended stories; rooms not used")
+            continue
+        ds['room'] = Factor([ROOMS.get(_number(row.get('acoustic_condition')), 'unknown') for row in rows])
+        ds['side'] = Factor([{1: 'left', 2: 'right'}.get(_number(row.get('attend_lr')), 'unknown') for row in rows])
+        save(ds, path)
+        (FIT_DIR / f'S{subject}' / 'DONE').unlink(missing_ok=True)
+        counts = {str(k): int(v) for k, v in zip(*numpy.unique(list(ds['room']), return_counts=True))}
+        report.append(f"S{subject}: trial table agrees on {agree}/{ds.n_cases} attended stories; rooms {counts}")
+    text = '\n'.join(report) + '\n'
+    (DERIV / 'rooms_report.txt').write_text(text)
+    print(text)
+    log("rooms done")
 
 
 # ---------------------------------------------------------------------------------------------- fit
@@ -391,7 +453,9 @@ if __name__ == '__main__':
         prepare()
     elif stage == 'fit':
         fit(int(sys.argv[2]))
+    elif stage == 'rooms':
+        rooms()
     elif stage == 'stats':
         stats(int(os.environ.get('DTU_SAMPLES', 10000)))
     else:
-        raise SystemExit(f"Unknown stage {stage!r}: prepare, fit <subject> or stats")
+        raise SystemExit(f"Unknown stage {stage!r}: prepare, rooms, fit <subject> or stats")

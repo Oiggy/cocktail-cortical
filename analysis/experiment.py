@@ -1661,6 +1661,69 @@ def dtu_run(force=False):
           "tests are done.")
 
 
+def dtu_rooms(poll=30):
+    """Add the three rooms (anechoic, mild, high reverberation) to the DTU analysis when the setup could not read
+    the trial table: installs mat-io on the login node, then a short cluster job reads each subject's trial
+    table, prints exactly why if it cannot, and adds the rooms to the prepared subjects. Then submits only the
+    room fits (the all-rooms fits are kept) and the group tests. Waits for the running DTU jobs to end first;
+    does nothing if every subject already has its rooms."""
+    if ANALYSIS['results_mode'] == 'compute':
+        print("Inside a cluster job: skipped.")
+        return
+    state = _dtu_state()
+    busy = [job for job in state['jobs'] if job in ('cocktail-dtu-prepare', 'cocktail-dtu-fit', 'cocktail-dtu-rooms')]
+    if busy:
+        print(f"DTU jobs are still queued or running ({', '.join(busy)}): run dtu_rooms() once they have finished "
+              f"(dtu_progress()), so the rooms are not changed under a running fit.")
+        return
+    if not state['prepared']:
+        print("The predictors and EEG are not made yet: run dtu_run() first.")
+        return
+    folder = _dtu_folder()
+    report = f"{folder}/derivatives/rooms_report.txt"
+    done = _cluster(f"bash -lc {shlex.quote(f'cat {report} 2>/dev/null')}").stdout.decode()
+    if done and 'no rooms' not in done and 'not prepared' not in done and 'only' not in done:
+        print("Every subject already has its rooms (dtu_progress() shows the room fits).\n" + done.rstrip())
+        return
+    if _on_cluster():
+        print("mat-io has to be installed from a login node (JupyterHub's compute node has no internet): ssh to the "
+              "cluster and run\n    micromamba run -n cocktail-cortical python -m pip install mat-io\n"
+              "then run dtu_rooms() again here.")
+    else:
+        root = Path(_setting('cluster_repo')).parent
+        install = (f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main && "
+                   f"MAMBA_ROOT_PREFIX=\"$HOME/{root}/micromamba\" \"$HOME/{root}/bin/micromamba\" run -n cocktail-cortical "
+                   f"python -m pip install -q mat-io && echo INSTALLED")
+        proc = _cluster(f"bash -lc {shlex.quote(install)}")
+        print("mat-io installed on the cluster." if 'INSTALLED' in proc.stdout.decode() else
+              f"Installing mat-io failed (carrying on; the report will say why):\n{proc.stderr.decode()[-1500:]}")
+    job = _dtu_sbatch("--export=ALL,STAGE=rooms --job-name=cocktail-dtu-rooms --cpus-per-task=2 --mem=48G --time=02:00:00")
+    print(f"Reading the trial tables (job {job}); waiting for it (a few minutes).")
+    try:
+        while _cluster(f"bash -lc 'squeue -h -j {int(job)} -o %T'").stdout.decode().strip():
+            time.sleep(poll)
+    except KeyboardInterrupt:
+        print(f"Stopped waiting. Job {job} keeps running; run dtu_rooms() again afterwards.")
+        return
+    text = _cluster(f"bash -lc {shlex.quote(f'cat {report} 2>/dev/null')}").stdout.decode().rstrip()
+    if not text:
+        runs = f"{shlex.quote(_setting('cluster_repo'))}/cluster/runs"
+        log_tail = f"tail -40 $(ls -t {runs}/cocktail-dtu-rooms-{int(job)}* | head -1)"
+        text = "The job wrote no report; the end of its log:\n" + _cluster(f"bash -lc {shlex.quote(log_tail)}").stdout.decode()
+    print(text)
+    todo = [s for s in range(1, 19) if s not in _dtu_state()['fitted']]
+    if not todo:
+        print("No subject got its rooms, so no new fits were submitted; the report above says why.")
+        return
+    fit = _dtu_sbatch(f"--export=ALL,STAGE=fit --job-name=cocktail-dtu-fit --array={','.join(map(str, todo))} "
+                      f"--cpus-per-task=8 --mem=32G --time=2-00:00:00")
+    stats = _dtu_sbatch(f"--export=ALL,STAGE=stats --job-name=cocktail-dtu-stats --cpus-per-task=8 --mem=32G "
+                        f"--time=06:00:00 --dependency=afterany:{fit}")
+    print(f"Submitted the room fits of {len(todo)} subjects (job {fit}; their all-rooms fits are kept) and the group "
+          f"tests (job {stats}). Follow them with dtu_progress(); then dtu_anechoic.ipynb, dtu_mild.ipynb and "
+          f"dtu_high.ipynb have results.")
+
+
 def dtu_progress():
     "The DTU analysis jobs still queued or running, how many subject fits are done, and the predictor/EEG report"
     folder = _dtu_folder()
@@ -1669,6 +1732,8 @@ def dtu_progress():
         'echo "Jobs:"; squeue -u "$me" -h -o "  %i %j %T %M" | awk \'$2 ~ /^cocktail-dtu/\' || true',
         f'echo; echo "Predictors and EEG:"; cat {folder}/derivatives/prepare_report.txt 2>/dev/null | sed "s/^/  /" '
         '|| echo "  not made yet"',
+        f'[ -s {folder}/derivatives/rooms_report.txt ] && {{ echo; echo "Rooms (dtu_rooms()):"; '
+        f'sed "s/^/  /" {folder}/derivatives/rooms_report.txt; }}',
         f'echo; echo "Fits done (subject: epochs):"; for d in {folder}/derivatives/fits/S*; do [ -d "$d" ] && '
         'echo "  $(basename "$d"): $(ls "$d" | grep -v part | sed "s/.pickle//" | tr "\\n" " ")"; done',
         f'echo; echo "Group results:"; ls {folder}/derivatives/results/*.pickle 2>/dev/null | xargs -n1 basename '
