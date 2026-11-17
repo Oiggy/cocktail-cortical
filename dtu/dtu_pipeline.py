@@ -173,30 +173,79 @@ def _story_envelope(name):
 
 # ---------------------------------------------------------------------------------------------- trial table
 
-def _accept_old_tables():
-    """Let mat-io read MATLAB tables saved before R2018a. mat-io's converter expects the 'versionSavedFrom' field
-    newer tables carry; the DTU trial tables (2018, older format) lack it but have the same 'data', 'nvars' and
-    'varnames', from which mat-io's own to_dataframe() builds the table."""
-    from matio.utils import matconvert
-    from matio.utils.converters import mattables
-    original = mattables.mat_to_table
-    if getattr(matconvert.MAT_TO_PY['table'], 'accepts_old_tables', False):
-        return
+def _table_parts(obj, depth=0):
+    "The {'data', 'varnames'} parts of a MATLAB table somewhere inside what mat-io returns unconverted, or None"
+    if depth > 6 or obj is None:
+        return None
+    props = getattr(obj, 'properties', None)
+    if props is not None:
+        found = _table_parts(props, depth + 1)
+        if found:
+            return found
+    if isinstance(obj, numpy.ndarray) and obj.dtype.names:
+        if {'data', 'varnames'} <= set(obj.dtype.names):
+            return {n: obj[n].flat[0] for n in obj.dtype.names}
+        return _table_parts(obj.flat[0] if obj.size else None, depth + 1)
+    if hasattr(obj, 'keys'):
+        if 'data' in obj and 'varnames' in obj:
+            return obj
+        for value in obj.values():
+            found = _table_parts(value, depth + 1)
+            if found:
+                return found
+    elif isinstance(obj, (list, tuple)) or (isinstance(obj, numpy.ndarray) and obj.dtype == object):
+        for value in (obj if isinstance(obj, (list, tuple)) else obj.flat):
+            found = _table_parts(value, depth + 1)
+            if found:
+                return found
+    return None
 
-    def mat_to_table(props, add_table_attrs=False, **kwargs):
-        attrs = props.get('props') if hasattr(props, 'get') else None
-        names = getattr(getattr(attrs, 'dtype', None), 'names', None) or ()
-        if 'versionSavedFrom' in names:
-            return original(props, add_table_attrs=add_table_attrs, **kwargs)
-        try:
-            return mattables.to_dataframe(props['data'], int(numpy.asarray(props['nvars']).ravel()[0]), props['varnames'])
-        except Exception as error:
-            keys = list(props.keys()) if hasattr(props, 'keys') else type(props).__name__
-            raise ValueError(f"old-format MATLAB table not readable ({type(error).__name__}: {error}); "
-                             f"its fields: {keys}") from error
 
-    mat_to_table.accepts_old_tables = True
-    matconvert.MAT_TO_PY['table'] = mat_to_table
+def _scalar(v):
+    "A MATLAB cell entry as a plain value: one-element arrays unwrapped, empty ones as ''"
+    while isinstance(v, (numpy.ndarray, list, tuple)):
+        flat = numpy.ravel(numpy.asarray(v, dtype=object)) if not isinstance(v, numpy.ndarray) else v.ravel()
+        if flat.size == 0:
+            return ''
+        if flat.size > 1:
+            return ''.join(map(str, flat)) if getattr(v, 'dtype', None) is not None and v.dtype.kind in 'US' else v
+        v = flat[0]
+    return v.item() if isinstance(v, numpy.generic) else v
+
+
+def _mat_strings(props):
+    "A MATLAB string array, stored unconverted: version, ndims, dims, one char count per string, then UTF-16 text"
+    data = numpy.asarray(props['any'], numpy.uint64).ravel()
+    ndims = int(data[1])
+    n = int(numpy.prod(data[2:2 + ndims]))
+    counts = data[2 + ndims:2 + ndims + n]
+    text = data[2 + ndims + n:].tobytes()
+    out, pos = [], 0
+    for count in counts:
+        if count >= 2 ** 63:  # missing string
+            out.append('')
+            continue
+        out.append(text[pos:pos + 2 * int(count)].decode('utf-16-le'))
+        pos += 2 * int(count)
+    return out
+
+
+def _column(col):
+    "One MATLAB table column as a list: cells and numbers as values, char matrices and strings as one string per row"
+    if getattr(col, 'classname', None) == 'string':
+        return _mat_strings(col.properties)
+    if isinstance(col, numpy.ndarray) and col.dtype == object:
+        return [_scalar(v) for v in col.ravel(order='F')]
+    if isinstance(col, numpy.ndarray) and col.dtype.kind in 'US' and col.ndim == 2 and col.shape[1] > 1:
+        return [''.join(map(str, row)).strip() for row in col]
+    return list(numpy.ravel(col, order='F'))
+
+
+def _table_from_parts(parts):
+    import pandas
+    names = [str(_scalar(v)) for v in numpy.ravel(parts['varnames'], order='F')]
+    data = list(numpy.ravel(parts['data'], order='F')) if isinstance(parts['data'], numpy.ndarray) else list(parts['data'])
+    return pandas.DataFrame({name: _column(col) for name, col in zip(names, data)})
 
 
 def _expinfo(subject, why=None):
@@ -204,20 +253,28 @@ def _expinfo(subject, why=None):
     mat-io reads (installed by dtu/download.sh). `why`: a list that collects the reason it could not be read."""
     why = why if why is not None else []
     try:
+        import matio
         from matio import load_from_mat
     except ImportError:
         why.append("mat-io is not installed in the cocktail-cortical environment")
         return None
-    _accept_old_tables()
     path = DTU / f'S{subject}.mat'
     try:
         mat = load_from_mat(str(path), variable_names=['expinfo'])
-    except TypeError:
-        mat = load_from_mat(str(path))
-    except Exception as error:
-        why.append(f"mat-io could not read S{subject}.mat ({type(error).__name__}: {error})")
-        log(f"  S{subject}: expinfo not readable ({type(error).__name__}: {error})")
-        return None
+    except Exception as first:
+        # Tables saved before MATLAB R2018a (as the DTU ones) lack fields mat-io's converter expects: read the
+        # table unconverted and build it from its own columns and variable names
+        try:
+            raw = load_from_mat(str(path), variable_names=['expinfo'], raw_data=True)
+            parts = _table_parts(raw.get('expinfo') if hasattr(raw, 'get') else raw)
+            if parts is None:
+                raise ValueError(f"no table columns found in: {repr(raw)[:600]}")
+            mat = {'expinfo': _table_from_parts(parts)}
+        except Exception as error:
+            why.append(f"mat-io {getattr(matio, '__version__', '?')} could not read the trial table of S{subject}.mat "
+                       f"({type(first).__name__}: {first}; unconverted: {type(error).__name__}: {error})")
+            log(f"  S{subject}: expinfo not readable: {why[-1]}")
+            return None
     table = mat.get('expinfo') if isinstance(mat, dict) else None
     if table is None:
         keys = sorted(k for k in mat if not k.startswith('__')) if isinstance(mat, dict) else type(mat).__name__
