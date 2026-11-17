@@ -1489,8 +1489,8 @@ def _dtu_state():
         '[ -s "$d/inspect_report.txt" ] && ! grep -q "Not there yet" "$d/inspect_report.txt" && echo inspected=1',
         'echo "jobs=$(squeue -u "${USER:-$(whoami)}" -h -o "%j" 2>/dev/null | grep "^cocktail-dtu" | sort -u | tr "\\n" " ")"',
         '[ -s "$d/derivatives/prepare_report.txt" ] && echo prepared=1',
-        'echo "fitted=$(for f in "$d"/derivatives/fits/S*/DONE; do [ -e "$f" ] && basename "$(dirname "$f")" | tr -d S; done | tr "\\n" " ")"',
-        'r="$d/derivatives/results/DONE"; if [ -e "$r" ] && [ -z "$(find "$d/derivatives/fits" -name DONE -newer "$r" 2>/dev/null)" ]; '
+        'echo "fitted=$(for f in "$d"/derivatives/raw/fits/S*/DONE; do [ -e "$f" ] && basename "$(dirname "$f")" | tr -d S; done | tr "\\n" " ")"',
+        'r="$d/derivatives/raw/results/DONE"; if [ -e "$r" ] && [ -z "$(find "$d/derivatives/raw/fits" -name DONE -newer "$r" 2>/dev/null)" ]; '
         'then echo stats_done=1; fi',
     ])
     out = _cluster(f"bash -lc {shlex.quote(script)}").stdout.decode()
@@ -1590,7 +1590,7 @@ def dtu_inspect(poll=30, force=False):
     print(_job_log(job, 1000))
 
 
-DTU_EPOCHS = ('all', 'anechoic', 'mild', 'high')
+DTU_EPOCHS = ('clean', 'all', 'anechoic', 'mild', 'high')
 
 
 def _dtu_sbatch(args, script='cluster/dtu_analysis.sbatch'):
@@ -1605,19 +1605,20 @@ def _dtu_sbatch(args, script='cluster/dtu_analysis.sbatch'):
 
 
 def dtu_run(force=False):
-    """Run the DTU forward-model analysis on the cluster (dtu/dtu_pipeline.py): one job makes the predictors and
-    EEG, one job per subject (in parallel) fits the TRFs, one job runs the group tests. Hours, not minutes; the
-    Mac can be closed. Follow it with dtu_progress().
+    """Run the DTU forward-model analysis on the cluster (dtu/dtu_pipeline.py), aligned with this project's: the raw
+    EEG preprocessed as this project's, the ROI from DTU's own clean-speech (single-talker) trials with this
+    project's rule, then the two-talker tests in that ROI. Jobs: the story predictors (once), a quick check on
+    subject 1 that the raw file, trial table and triggers can be read (the subject jobs start only if it passes),
+    one job per subject (preprocessing and fits, in parallel), and the group tests. Hours; the Mac can be closed.
+    Follow it with dtu_progress().
 
-    Submits only what is missing, so Run All is safe: nothing if the results are complete or the jobs are
-    already queued or running; otherwise the predictors/EEG only if not made yet, the fits only of subjects
-    not finished, and the group tests. force=True redoes the predictors/EEG and the group tests (finished
-    fits are still kept)."""
+    Submits only what is missing, so Run All is safe: nothing if the results are complete or DTU jobs are queued
+    or running; otherwise only unfinished subjects, and the group tests. force=True reruns the group tests."""
     if ANALYSIS['results_mode'] == 'compute':
         print("Inside a cluster job: skipped.")
         return
     state = _dtu_state()
-    running = [job for job in state['jobs'] if job in ('cocktail-dtu-prepare', 'cocktail-dtu-fit', 'cocktail-dtu-stats')]
+    running = [job for job in state['jobs'] if job.startswith('cocktail-dtu-') and job != 'cocktail-dtu-inspect']
     if running:
         print(f"The DTU analysis is already queued or running on the cluster ({', '.join(running)}); "
               f"follow it with dtu_progress().")
@@ -1626,118 +1627,63 @@ def dtu_run(force=False):
         print("The dataset is not (completely) downloaded yet: run dtu_download() first.")
         return
     todo = [s for s in range(1, 19) if s not in state['fitted']]
-    if state['prepared'] and not todo and state['stats_done'] and not force:
-        print("The DTU analysis is complete: open dtu_all.ipynb (and dtu_anechoic, dtu_mild, dtu_high). "
-              "dtu_run(force=True) would redo the predictors/EEG and group tests.")
+    if not todo and state['stats_done'] and not force:
+        print("The DTU analysis is complete: open dtu_clean.ipynb (the ROI), then dtu_all.ipynb and the room "
+              "notebooks. dtu_run(force=True) reruns the group tests.")
         return
-    if not _on_cluster():
-        update = f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main"
+    if _on_cluster():
+        print("Note: mat-io (which reads the DTU trial table) can only be installed from a login node; if the check "
+              "job below says it is missing, ssh to the cluster and run\n"
+              "    micromamba run -n cocktail-cortical python -m pip install mat-io")
+    else:
+        root = Path(_setting('cluster_repo')).parent
+        update = (f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main && "
+                  f"MAMBA_ROOT_PREFIX=\"$HOME/{root}/micromamba\" \"$HOME/{root}/bin/micromamba\" run -n cocktail-cortical "
+                  f"python -m pip install -q mat-io")
         proc = _cluster(f"bash -lc {shlex.quote(update)}")
         if proc.returncode:
-            raise RuntimeError(f"Updating the cluster's copy of the repo failed:\n{proc.stderr.decode()}")
+            raise RuntimeError(f"Updating the cluster's repo or installing mat-io failed:\n{proc.stderr.decode()[-1500:]}")
     submitted, after = [], None
-    if not state['prepared'] or force:
-        if force:
-            _cluster(f"bash -lc {shlex.quote(f'rm -f {_dtu_folder()}/derivatives/prepare_report.txt')}")
+    if not state['prepared']:
         after = _dtu_sbatch("--export=ALL,STAGE=prepare --job-name=cocktail-dtu-prepare "
-                            "--cpus-per-task=32 --mem=96G --time=08:00:00")
-        submitted.append(f"predictors and EEG (job {after})")
+                            "--cpus-per-task=16 --mem=64G --time=04:00:00")
+        submitted.append(f"the story predictors (job {after})")
     if todo:
-        dependency = f" --dependency=afterok:{after}" if after else ''
+        dependency = f" --dependency=afterok:{after} --kill-on-invalid-dep=yes" if after else ''
+        check = _dtu_sbatch(f"--export=ALL,STAGE=rawcheck --job-name=cocktail-dtu-rawcheck "
+                            f"--cpus-per-task=2 --mem=16G --time=00:30:00{dependency}")
+        submitted.append(f"the check of subject 1's raw file, trial table and triggers (job {check})")
         after = _dtu_sbatch(f"--export=ALL,STAGE=fit --job-name=cocktail-dtu-fit --array={','.join(map(str, todo))} "
-                            f"--cpus-per-task=8 --mem=32G --time=2-00:00:00{dependency}")
-        submitted.append(f"the TRF fits of {len(todo)} subject{'s' if len(todo) > 1 else ''} (job {after})")
+                            f"--cpus-per-task=8 --mem=48G --time=2-00:00:00 --dependency=afterok:{check} "
+                            f"--kill-on-invalid-dep=yes")
+        submitted.append(f"preprocessing and fits of {len(todo)} subject{'s' if len(todo) > 1 else ''} (job {after})")
     dependency = f" --dependency=afterany:{after}" if after else ''
     stats = _dtu_sbatch(f"--export=ALL,STAGE=stats --job-name=cocktail-dtu-stats "
                         f"--cpus-per-task=8 --mem=32G --time=06:00:00{dependency}")
-    submitted.append(f"the group tests (job {stats})")
-    skipped = []
-    if state['prepared'] and not force:
-        skipped.append("predictors and EEG")
-    if state['fitted']:
-        skipped.append(f"fits of {len(state['fitted'])} subjects")
-    print("Submitted " + ", then ".join(submitted) + "." + (f" Already done, kept: {', '.join(skipped)}." if skipped else ''))
-    print("Follow them with dtu_progress(); dtu_all.ipynb and the room notebooks read the results once the group "
-          "tests are done.")
-
-
-def dtu_rooms(poll=30):
-    """Add the three rooms (anechoic, mild, high reverberation) to the DTU analysis when the setup could not read
-    the trial table: installs mat-io on the login node, then a short cluster job reads each subject's trial
-    table, prints exactly why if it cannot, and adds the rooms to the prepared subjects. Then submits only the
-    room fits (the all-rooms fits are kept) and the group tests. Waits for the running DTU jobs to end first;
-    does nothing if every subject already has its rooms."""
-    if ANALYSIS['results_mode'] == 'compute':
-        print("Inside a cluster job: skipped.")
-        return
-    state = _dtu_state()
-    busy = [job for job in state['jobs'] if job in ('cocktail-dtu-prepare', 'cocktail-dtu-fit', 'cocktail-dtu-rooms')]
-    if busy:
-        print(f"DTU jobs are still queued or running ({', '.join(busy)}): run dtu_rooms() once they have finished "
-              f"(dtu_progress()), so the rooms are not changed under a running fit.")
-        return
-    if not state['prepared']:
-        print("The predictors and EEG are not made yet: run dtu_run() first.")
-        return
-    folder = _dtu_folder()
-    report = f"{folder}/derivatives/rooms_report.txt"
-    done = _cluster(f"bash -lc {shlex.quote(f'cat {report} 2>/dev/null')}").stdout.decode()
-    if done and 'no rooms' not in done and 'not prepared' not in done and 'only' not in done:
-        print("Every subject already has its rooms (dtu_progress() shows the room fits).\n" + done.rstrip())
-        return
-    if _on_cluster():
-        print("mat-io has to be installed from a login node (JupyterHub's compute node has no internet): ssh to the "
-              "cluster and run\n    micromamba run -n cocktail-cortical python -m pip install mat-io\n"
-              "then run dtu_rooms() again here.")
-    else:
-        root = Path(_setting('cluster_repo')).parent
-        install = (f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main && "
-                   f"MAMBA_ROOT_PREFIX=\"$HOME/{root}/micromamba\" \"$HOME/{root}/bin/micromamba\" run -n cocktail-cortical "
-                   f"python -m pip install -q mat-io && echo INSTALLED")
-        proc = _cluster(f"bash -lc {shlex.quote(install)}")
-        print("mat-io installed on the cluster." if 'INSTALLED' in proc.stdout.decode() else
-              f"Installing mat-io failed (carrying on; the report will say why):\n{proc.stderr.decode()[-1500:]}")
-    job = _dtu_sbatch("--export=ALL,STAGE=rooms --job-name=cocktail-dtu-rooms --cpus-per-task=2 --mem=48G --time=02:00:00")
-    print(f"Reading the trial tables (job {job}); waiting for it (a few minutes).")
-    try:
-        while _cluster(f"bash -lc 'squeue -h -j {int(job)} -o %T'").stdout.decode().strip():
-            time.sleep(poll)
-    except KeyboardInterrupt:
-        print(f"Stopped waiting. Job {job} keeps running; run dtu_rooms() again afterwards.")
-        return
-    text = _cluster(f"bash -lc {shlex.quote(f'cat {report} 2>/dev/null')}").stdout.decode().rstrip()
-    if not text:
-        runs = f"{shlex.quote(_setting('cluster_repo'))}/cluster/runs"
-        log_tail = f"tail -40 $(ls -t {runs}/cocktail-dtu-rooms-{int(job)}* | head -1)"
-        text = "The job wrote no report; the end of its log:\n" + _cluster(f"bash -lc {shlex.quote(log_tail)}").stdout.decode()
-    print(text)
-    todo = [s for s in range(1, 19) if s not in _dtu_state()['fitted']]
-    if not todo:
-        print("No subject got its rooms, so no new fits were submitted; the report above says why.")
-        return
-    fit = _dtu_sbatch(f"--export=ALL,STAGE=fit --job-name=cocktail-dtu-fit --array={','.join(map(str, todo))} "
-                      f"--cpus-per-task=8 --mem=32G --time=2-00:00:00")
-    stats = _dtu_sbatch(f"--export=ALL,STAGE=stats --job-name=cocktail-dtu-stats --cpus-per-task=8 --mem=32G "
-                        f"--time=06:00:00 --dependency=afterany:{fit}")
-    print(f"Submitted the room fits of {len(todo)} subjects (job {fit}; their all-rooms fits are kept) and the group "
-          f"tests (job {stats}). Follow them with dtu_progress(); then dtu_anechoic.ipynb, dtu_mild.ipynb and "
-          f"dtu_high.ipynb have results.")
+    submitted.append(f"the DTU ROI and group tests (job {stats})")
+    kept = f" Already done, kept: fits of {len(state['fitted'])} subjects." if state['fitted'] else ''
+    print("Submitted " + ", then ".join(submitted) + "." + kept)
+    print("If the check fails, the later jobs are cancelled and dtu_progress() shows why. Follow them with "
+          "dtu_progress(); dtu_clean.ipynb, dtu_all.ipynb and the room notebooks read the results at the end.")
 
 
 def dtu_progress():
-    "The DTU analysis jobs still queued or running, how many subject fits are done, and the predictor/EEG report"
+    "The DTU jobs still queued or running, the subject-1 check, each subject's preprocessing report, the DTU ROI and the fits done"
     folder = _dtu_folder()
+    runs = f"{shlex.quote(_setting('cluster_repo'))}/cluster/runs"
     script = '\n'.join([
+        f'd={folder}/derivatives/raw',
         'me="${USER:-$(whoami)}"',
-        'echo "Jobs:"; squeue -u "$me" -h -o "  %i %j %T %M" | awk \'$2 ~ /^cocktail-dtu/\' || true',
-        f'echo; echo "Predictors and EEG:"; cat {folder}/derivatives/prepare_report.txt 2>/dev/null | sed "s/^/  /" '
-        '|| echo "  not made yet"',
-        f'[ -s {folder}/derivatives/rooms_report.txt ] && {{ echo; echo "Rooms (dtu_rooms()):"; '
-        f'sed "s/^/  /" {folder}/derivatives/rooms_report.txt; }}',
-        f'echo; echo "Fits done (subject: epochs):"; for d in {folder}/derivatives/fits/S*; do [ -d "$d" ] && '
-        'echo "  $(basename "$d"): $(ls "$d" | grep -v part | sed "s/.pickle//" | tr "\\n" " ")"; done',
-        f'echo; echo "Group results:"; ls {folder}/derivatives/results/*.pickle 2>/dev/null | xargs -n1 basename '
-        '| sed "s/^/  /" || echo "  none yet"',
+        'echo "Jobs:"; squeue -u "$me" -h -o "  %i %j %T %M %r" | awk \'$2 ~ /^cocktail-dtu/\' || true',
+        f'c=$(ls -t {runs}/cocktail-dtu-rawcheck-* 2>/dev/null | head -1); if [ -n "$c" ]; then echo; '
+        'echo "Check of subject 1 (raw file, trial table, triggers):"; grep -E "OK:|FAILED|S1.mat|Error" "$c" | tail -4 | sed "s/^/  /"; fi',
+        'echo; echo "Preprocessing (per subject):"; ls "$d"/subjects/S*_report.txt >/dev/null 2>&1 && '
+        'cat $(ls "$d"/subjects/S*_report.txt | sort -V) | sed "s/^/  /" || echo "  none yet"',
+        'echo; echo "DTU ROI (from DTU clean speech):"; [ -s "$d/roi.txt" ] && grep "^# Rule\|^# DTU" "$d/roi.txt" | sed "s/^/  /" '
+        '&& echo "  $(grep -v "^#" "$d/roi.txt" | tr "\n" " ")" || echo "  not made yet (made by the group-test job)"',
+        'echo; echo "Fits done (subject: epochs):"; for s in "$d"/fits/S*; do [ -d "$s" ] && '
+        'echo "  $(basename "$s"): $(ls "$s" | grep -v part | sed "s/.pickle//" | tr "\n" " ")"; done',
+        'echo; echo "Group results:"; ls "$d"/results/*.pickle 2>/dev/null | xargs -n1 basename | sed "s/^/  /" || echo "  none yet"',
     ])
     print(_cluster(f"bash -lc {shlex.quote(script)}").stdout.decode().rstrip())
 
@@ -1748,9 +1694,9 @@ def _dtu_results(epoch):
         raise ValueError(f"epoch={epoch!r}; choose from {DTU_EPOCHS}")
     key = f'dtu-{epoch}'
     if key not in _remote_results:
-        path = f"{_dtu_folder()}/derivatives/results/{epoch}.pickle"
+        path = f"{_dtu_folder()}/derivatives/raw/results/{epoch}.pickle"
         if _on_cluster() or ANALYSIS['results_mode'] == 'compute':
-            local = Path.home() / Path(_setting('cluster_repo')).parent / 'dataset' / 'dtu' / 'derivatives' / 'results' / f'{epoch}.pickle'
+            local = Path.home() / Path(_setting('cluster_repo')).parent / 'dataset' / 'dtu' / 'derivatives' / 'raw' / 'results' / f'{epoch}.pickle'
             data = local.read_bytes() if local.exists() else None
         else:
             proc = _cluster(f"bash -lc {shlex.quote(f'if [ -f {path} ]; then cat {path}; else exit 3; fi')}")
@@ -1763,23 +1709,37 @@ def _dtu_results(epoch):
 
 
 def dtu_setup(epoch):
-    """Read the DTU results for `epoch` and set this notebook's ROI (the clean-speech ROI of this project, roi.txt)
-    and test region; prints how many subjects and trials went in. Returns the ROI."""
+    """Read the DTU results for `epoch` and set this notebook's ROI: the DTU ROI, found from DTU's own clean speech
+    (single-talker trials) with this project's rule (dtu_clean.ipynb). Prints the subjects, trials and ROI.
+    Returns the ROI."""
     res = _dtu_results(epoch)
     configure_analysis(roi=res['roi'], test_region='roi')
     trials = sorted(set(res['n_trials'].values()))
     print(f"DTU {epoch}: {res['n_subjects']} subjects, {'/'.join(map(str, trials))} trials of 50 s each.")
-    print(f"ROI ({len(res['roi'])} sensors, from this project's clean-speech notebook, roi.txt): {', '.join(res['roi'])}")
+    rule = res.get('roi_rule') or _dtu_results('clean').get('roi_rule', '')
+    print(f"DTU ROI ({len(res['roi'])} sensors, from DTU clean speech; {rule}): {', '.join(res['roi'])}")
+    if res.get('roi_cocktail'):
+        print(f"This project's ROI, for the check at the end ({len(res['roi_cocktail'])} sensors): "
+              f"{', '.join(res['roi_cocktail'])}")
     return res['roi']
 
 
-def dtu_model_test(label, epoch, metric='r'):
-    "One DTU model comparison (full model vs. without `label`), as (data, diff, result) like compute_unique_contribution()"
+def dtu_model_test(label, epoch, roi='dtu', metric='r'):
+    """One DTU model comparison (full model vs. without `label`), as (data, diff, result) like
+    compute_unique_contribution(). roi='dtu' (the DTU ROI) or 'cocktail' (this project's roi.txt, as a check).
+    In 'clean' the test is over the whole scalp (it finds the ROI)."""
     res = _dtu_results(epoch)
-    data, result = res['tests'][label]
+    tests, sensors = (res['tests'], res['roi']) if roi == 'dtu' else (res['tests_cocktail'], res['roi_cocktail'])
+    data, result = tests[label]
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
-    diff[f'roi_{metric}'] = diff[metric].mean(sensor=res['roi'])
+    diff[f'roi_{metric}'] = diff[metric].mean(sensor=sensors)
     return data, diff, result
+
+
+def dtu_rois(epoch='clean'):
+    "(the DTU ROI, this project's ROI) as used for `epoch`"
+    res = _dtu_results(epoch)
+    return res['roi'], res.get('roi_cocktail', [])
 
 
 def dtu_trfs(epoch):
