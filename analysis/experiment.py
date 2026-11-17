@@ -1278,7 +1278,7 @@ RESULTS_DIR = Path(DATA_ROOT) / 'derivatives' / 'results'
 # The SSH connection cluster/connect.sh opens (one Duo login), reused by every request
 CONTROL_PATH = '~/.ssh/cocktail-%r@%h:%p'
 NOTEBOOKS = (
-    'clean', 'diotic', 'diotic_overt_masked_onsets', 'dichotic', 'dichotic_left', 'dichotic_left_overt_masked_onsets',
+    'clean', 'diotic', 'diotic_overt_masked_onsets', 'dichotic', 'dichotic_overt_masked_onsets', 'dichotic_left', 'dichotic_left_overt_masked_onsets',
     'dichotic_right', 'dichotic_right_overt_masked_onsets', 'binaural', 'binaural_overt_masked_onsets',
 )
 _remote_results = {}  # results read from the cluster in this session, kept in memory only

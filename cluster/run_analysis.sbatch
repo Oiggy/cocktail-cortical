@@ -32,7 +32,7 @@ micromamba activate cocktail-cortical
 
 export COCKTAIL_ANSWER="${COCKTAIL_ANSWER:-s}"
 export COCKTAIL_RESULTS=compute
-NOTEBOOKS="${NOTEBOOKS:-clean diotic diotic_overt_masked_onsets dichotic dichotic_left dichotic_left_overt_masked_onsets dichotic_right dichotic_right_overt_masked_onsets binaural binaural_overt_masked_onsets}"
+NOTEBOOKS="${NOTEBOOKS:-clean diotic diotic_overt_masked_onsets dichotic dichotic_overt_masked_onsets dichotic_left dichotic_left_overt_masked_onsets dichotic_right dichotic_right_overt_masked_onsets binaural binaural_overt_masked_onsets}"
 RESULTS="$WORK/dataset/cocktail/bids/derivatives/results"
 
 cd "$REPO/analysis"

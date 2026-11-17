@@ -186,6 +186,7 @@ TEST_REGION = {
     'diotic': 'roi',
     'diotic_overt_masked_onsets': 'roi',
     'dichotic': 'roi',
+    'dichotic_overt_masked_onsets': 'roi',
     'dichotic_left': 'roi',
     'dichotic_left_overt_masked_onsets': 'roi',
     'dichotic_right': 'roi',
