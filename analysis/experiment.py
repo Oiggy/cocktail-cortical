@@ -1684,7 +1684,7 @@ def dtu_progress():
         'echo "Check of subject 1 (raw file, trial table, triggers):"; grep -E "OK:|FAILED|S1.mat|Error" "$c" | tail -4 | sed "s/^/  /"; fi',
         'echo; echo "Preprocessing (per subject):"; ls "$d"/subjects/S*_report.txt >/dev/null 2>&1 && '
         'cat $(ls "$d"/subjects/S*_report.txt | sort -V) | sed "s/^/  /" || echo "  none yet"',
-        'echo; echo "DTU ROI (sensitivity analysis B, from DTU clean speech):"; [ -s "$d/roi.txt" ] && grep "^# Rule\|^# DTU" "$d/roi.txt" | sed "s/^/  /" '
+        'echo; echo "DTU ROI (sensitivity analysis B, from DTU clean speech):"; [ -s "$d/roi.txt" ] && grep -E "^# DTU|Rule:" "$d/roi.txt" | sed "s/^/  /" '
         '&& echo "  $(grep -v "^#" "$d/roi.txt" | tr "\n" " ")" || echo "  not made yet (made by the group-test job)"',
         'echo; echo "Fits done (subject: epochs):"; for s in "$d"/fits/S*; do [ -d "$s" ] && '
         'echo "  $(basename "$s"): $(ls "$s" | grep -v part | sed "s/.pickle//" | tr "\n" " ")"; done',
