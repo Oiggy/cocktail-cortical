@@ -14,11 +14,12 @@ Aligned with this project, step for step:
           mixture from the two stories summed (the rooms were simulated at presentation, so the exact mixture at
           the ears is not available)
   TRFs    the same boosting settings (-100 to 400 ms, 50 ms basis, l1, selective stopping, cross-validated)
-  ROI     as this project's clean notebook: from the single-talker (clean speech) trials, the sensors where
-          onsets and envelope both uniquely improve the prediction (one-tailed TFCE over the whole scalp,
-          conjunction). The two-talker trials, tested inside it, are independent of it.
-  Tests   as this project's two-talker notebooks: TFCE in the ROI, and the ROI-averaged t-test; repeated in
-          this project's own clean-speech ROI (roi.txt) as a check
+  Tests   as this project's two-talker notebooks (one-tailed TFCE, and the ROI-averaged t-test), in three analyses:
+          primary   this project's clean-speech ROI (roi.txt): pre-specified in an independent sample before any
+                    DTU analysis, so both datasets are tested in the same sensors
+          B         the DTU ROI: from DTU's single-talker trials (ten repetitions of one 50 s clip) with this
+                    project's rule (onsets and envelope both significant, whole-scalp TFCE, conjunction)
+          C         the whole scalp, no ROI
 
 Stages (python dtu/dtu_pipeline.py <stage> [subject]):
   prepare      the story predictors, once
@@ -27,7 +28,8 @@ Stages (python dtu/dtu_pipeline.py <stage> [subject]):
   fit S        one subject: preprocessing (once), then the clean-speech fits on the single-talker trials and
                the two-talker fits (full model, without each predictor, without each stream; all rooms and
                each room). Saved model by model, so it resumes.
-  stats        the DTU ROI from the clean-speech fits, then the group tests and TRFs, read by the dtu_*.ipynb
+  stats        the DTU ROI (B) from the clean-speech fits, then the group tests in the three analyses and the
+               TRFs, read by the dtu_*.ipynb
 """
 import json
 import pickle
@@ -638,56 +640,74 @@ def _trfs(loaded, columns):
 
 
 def stats(samples=10000):
+    """Group results, in three analyses (the manuscript's plan):
+      'cocktail' (primary)  TFCE within this project's clean-speech ROI (roi.txt), pre-specified in an independent
+                            sample before any DTU analysis, so both datasets are tested in the same sensors
+      'dtu'      (sensitivity) TFCE within the DTU ROI, found from DTU's single-talker trials with this project's rule
+      'scalp'    (sensitivity) TFCE over the whole scalp, no ROI
+    """
     summary = {}
-    # 1. The DTU ROI, from clean speech (single-talker trials), with this project's rule (find_roi())
-    clean = _complete('clean', CLEAN_MODELS)
-    if len(clean) < 3:
-        raise SystemExit(f"Only {len(clean)} subjects have clean-speech fits: no ROI")
-    tests, significant, order = {}, {}, None
-    for label, reduced in CLEAN_COMPARISONS.items():
-        data, result = _test(clean, 'full', reduced, None, samples)
-        tests[label] = (data, result)
-        order = list(result.p.sensor.names)
-        significant[label] = {n for n, p in zip(result.p.sensor.names, result.p.x) if p <= ALPHA}
-        log(f"clean {label}: t_max = {float(numpy.nanmax(result.t.x)):.2f}, p = {float(numpy.nanmin(result.p.x)):.3f}, "
-            f"{len(significant[label])} significant sensors")
-    every = [n for n in order if all(n in s for s in significant.values())]
-    some = [n for n in order if any(n in s for s in significant.values())]
-    cocktail = [n for n in _names(COCKTAIL_ROI) if n in order] if COCKTAIL_ROI.exists() else []
-    if every:
-        roi, rule = every, "conjunction: significant for every predictor"
-    elif some:
-        roi, rule = some, "union: no sensor was significant for every predictor, so those significant for any"
-    else:
-        roi, rule = cocktail, "fallback: no significant sensor in DTU clean speech, so this project's roi.txt"
-    counts = ', '.join(f"{label}: {len(s)}" for label, s in significant.items())
-    DTU_ROI_FILE.write_text('\n'.join([
-        "# DTU ROI, from DTU's single-talker (clean speech) trials with this project's rule (find_roi()):",
-        "# sensors where onsets and envelope uniquely improve the prediction of held-out EEG",
-        f"# (one-tailed TFCE over the whole scalp, p <= {ALPHA}). Rule: {rule}. Significant sensors: {counts}.",
-        f"# {len(clean)} subjects; made {time.strftime('%Y-%m-%d %H:%M')}.", *roi, '']))
-    save({'tests': tests, 'trfs': _trfs(clean, CLEAN_MODELS['full']), 'roi': roi, 'roi_rule': rule,
-          'roi_cocktail': cocktail, 'n_subjects': len(clean),
-          'n_trials': {f'S{s}': f['n_trials'] for s, f in clean.items()}}, RESULT_DIR / 'clean.pickle')
-    summary['clean'] = {'subjects': len(clean), 'roi': roi, 'rule': rule}
-    log(f"DTU ROI ({len(roi)} sensors; {rule}): {', '.join(roi)}")
+    cocktail_names = _names(COCKTAIL_ROI) if COCKTAIL_ROI.exists() else []
+    if not cocktail_names:
+        raise SystemExit(f"This project's ROI ({COCKTAIL_ROI}) is missing: run the clean notebook first")
 
-    # 2. The two-talker tests, in the DTU ROI and, as a check, in this project's ROI
+    # 1. The DTU ROI (sensitivity), from clean speech (single-talker trials), with this project's rule (find_roi())
+    clean = _complete('clean', CLEAN_MODELS)
+    rois = {'cocktail': [], 'dtu': []}
+    if len(clean) >= 3:
+        tests, significant, order = {}, {}, None
+        for label, reduced in CLEAN_COMPARISONS.items():
+            data, result = _test(clean, 'full', reduced, None, samples)
+            tests[label] = (data, result)
+            order = list(result.p.sensor.names)
+            significant[label] = {n for n, p in zip(result.p.sensor.names, result.p.x) if p <= ALPHA}
+            log(f"clean {label}: t_max = {float(numpy.nanmax(result.t.x)):.2f}, "
+                f"p = {float(numpy.nanmin(result.p.x)):.3f}, {len(significant[label])} significant sensors")
+        rois['cocktail'] = [n for n in cocktail_names if n in order]
+        every = [n for n in order if all(n in s for s in significant.values())]
+        some = [n for n in order if any(n in s for s in significant.values())]
+        if every:
+            rois['dtu'], rule = every, "conjunction: significant for every predictor"
+        elif some:
+            rois['dtu'], rule = some, "union: no sensor was significant for every predictor, so those significant for any"
+        else:
+            rois['dtu'], rule = [], "none: no significant sensor in DTU clean speech, so no DTU ROI (analysis B is skipped)"
+        counts = ', '.join(f"{label}: {len(s)}" for label, s in significant.items())
+        DTU_ROI_FILE.write_text('\n'.join([
+            "# DTU ROI (sensitivity analysis B), from DTU's single-talker trials with this project's rule (find_roi()):",
+            "# sensors where onsets and envelope uniquely improve the prediction of held-out EEG",
+            f"# (one-tailed TFCE over the whole scalp, p <= {ALPHA}). Rule: {rule}. Significant sensors: {counts}.",
+            f"# {len(clean)} subjects; made {time.strftime('%Y-%m-%d %H:%M')}.", *rois['dtu'], '']))
+        save({'tests': {'scalp': tests}, 'trfs': _trfs(clean, CLEAN_MODELS['full']), 'rois': rois, 'roi_rule': rule,
+              'n_subjects': len(clean), 'n_trials': {f'S{s}': f['n_trials'] for s, f in clean.items()}},
+             RESULT_DIR / 'clean.pickle')
+        summary['clean'] = {'subjects': len(clean), 'roi_dtu': rois['dtu'], 'rule': rule}
+        log(f"DTU ROI ({len(rois['dtu'])} sensors; {rule}): {', '.join(rois['dtu'])}")
+    else:
+        rule = f"not made: only {len(clean)} subjects have clean-speech fits"
+        log(rule)
+
+    # 2. The two-talker tests in the three analyses
     for epoch in EPOCHS:
         loaded = _complete(epoch, MODELS)
         if len(loaded) < 3:
             log(f"{epoch}: only {len(loaded)} subjects; skipped")
             continue
-        tests, tests_cocktail = {}, {}
+        names = list(next(iter(loaded.values()))['r']['full'].sensor.names)
+        rois['cocktail'] = [n for n in cocktail_names if n in names]
+        regions = {'cocktail': rois['cocktail'], 'scalp': None}
+        if rois['dtu']:
+            regions['dtu'] = rois['dtu']
+        tests = {region: {} for region in regions}
         for label, reduced in COMPARISONS.items():
-            tests[label] = _test(loaded, 'full', reduced, roi, samples)
-            if cocktail:
-                tests_cocktail[label] = _test(loaded, 'full', reduced, cocktail, samples)
-            result = tests[label][1]
-            log(f"{epoch} {label}: t_max = {float(numpy.nanmax(result.t.x)):.2f}, p = {float(numpy.nanmin(result.p.x)):.3f}")
-        save({'tests': tests, 'tests_cocktail': tests_cocktail, 'trfs': _trfs(loaded, ALL_COLUMNS), 'roi': roi,
-              'roi_cocktail': cocktail, 'n_subjects': len(loaded),
-              'n_trials': {f'S{s}': f['n_trials'] for s, f in loaded.items()}}, RESULT_DIR / f'{epoch}.pickle')
+            for region, sensors in regions.items():
+                tests[region][label] = _test(loaded, 'full', reduced, sensors, samples)
+            result = tests['cocktail'][label][1]
+            log(f"{epoch} {label} (primary, this project's ROI): t_max = {float(numpy.nanmax(result.t.x)):.2f}, "
+                f"p = {float(numpy.nanmin(result.p.x)):.3f}")
+        save({'tests': tests, 'trfs': _trfs(loaded, ALL_COLUMNS), 'rois': dict(rois), 'roi_rule': rule,
+              'n_subjects': len(loaded), 'n_trials': {f'S{s}': f['n_trials'] for s, f in loaded.items()}},
+             RESULT_DIR / f'{epoch}.pickle')
         summary[epoch] = {'subjects': len(loaded)}
     (RESULT_DIR / 'summary.json').write_text(json.dumps(summary, indent=1))
     (RESULT_DIR / 'DONE').write_text(time.strftime('%F %T') + '\n')  # read by dtu_run()
