@@ -1668,8 +1668,13 @@ def dtu_run(force=False):
 
 
 def dtu_progress():
-    "The DTU jobs still queued or running, the subject-1 check, each subject's preprocessing report, the DTU ROI and the fits done"
+    """The DTU jobs still queued or running, the subject-1 check, each subject's preprocessing report, the DTU ROI and
+    the fits done. Also brings the cluster's copy of the repo up to date, so jobs that have not started yet run the
+    latest code."""
     folder = _dtu_folder()
+    if not _on_cluster():
+        update = f"cd {shlex.quote(_setting('cluster_repo'))} && git pull -q --no-rebase --no-edit origin main"
+        _cluster(f"bash -lc {shlex.quote(update)}")
     runs = f"{shlex.quote(_setting('cluster_repo'))}/cluster/runs"
     script = '\n'.join([
         f'd={folder}/derivatives/raw',
@@ -1679,7 +1684,7 @@ def dtu_progress():
         'echo "Check of subject 1 (raw file, trial table, triggers):"; grep -E "OK:|FAILED|S1.mat|Error" "$c" | tail -4 | sed "s/^/  /"; fi',
         'echo; echo "Preprocessing (per subject):"; ls "$d"/subjects/S*_report.txt >/dev/null 2>&1 && '
         'cat $(ls "$d"/subjects/S*_report.txt | sort -V) | sed "s/^/  /" || echo "  none yet"',
-        'echo; echo "DTU ROI (from DTU clean speech):"; [ -s "$d/roi.txt" ] && grep "^# Rule\|^# DTU" "$d/roi.txt" | sed "s/^/  /" '
+        'echo; echo "DTU ROI (sensitivity analysis B, from DTU clean speech):"; [ -s "$d/roi.txt" ] && grep "^# Rule\|^# DTU" "$d/roi.txt" | sed "s/^/  /" '
         '&& echo "  $(grep -v "^#" "$d/roi.txt" | tr "\n" " ")" || echo "  not made yet (made by the group-test job)"',
         'echo; echo "Fits done (subject: epochs):"; for s in "$d"/fits/S*; do [ -d "$s" ] && '
         'echo "  $(basename "$s"): $(ls "$s" | grep -v part | sed "s/.pickle//" | tr "\n" " ")"; done',
@@ -1721,29 +1726,40 @@ def _dtu_results(epoch):
     return _remote_results[key]
 
 
+DTU_REGIONS = {
+    'cocktail': "primary: this project's clean-speech ROI (roi.txt), pre-specified in an independent sample",
+    'dtu': "sensitivity B: the DTU ROI, from DTU's single-talker trials with this project's rule",
+    'scalp': "sensitivity C: the whole scalp, no ROI",
+}
+
+
 def dtu_setup(epoch):
-    """Read the DTU results for `epoch` and set this notebook's ROI: the DTU ROI, found from DTU's own clean speech
-    (single-talker trials) with this project's rule (dtu_clean.ipynb). Prints the subjects, trials and ROI.
-    Returns the ROI."""
+    """Read the DTU results for `epoch` and set this notebook's ROI to the primary analysis's: this project's
+    clean-speech ROI (roi.txt), pre-specified in an independent sample. Prints the subjects, trials and the ROIs of
+    the three analyses. Returns the primary ROI."""
     res = _dtu_results(epoch)
-    configure_analysis(roi=res['roi'], test_region='roi')
+    rois = res['rois']
+    configure_analysis(roi=rois['cocktail'] or rois['dtu'], test_region='roi')
     trials = sorted(set(res['n_trials'].values()))
     print(f"DTU {epoch}: {res['n_subjects']} subjects, {'/'.join(map(str, trials))} trials of 50 s each.")
-    rule = res.get('roi_rule') or _dtu_results('clean').get('roi_rule', '')
-    print(f"DTU ROI ({len(res['roi'])} sensors, from DTU clean speech; {rule}): {', '.join(res['roi'])}")
-    if res.get('roi_cocktail'):
-        print(f"This project's ROI, for the check at the end ({len(res['roi_cocktail'])} sensors): "
-              f"{', '.join(res['roi_cocktail'])}")
-    return res['roi']
+    print(f"Primary ROI, this project's clean-speech ROI ({len(rois['cocktail'])} sensors): {', '.join(rois['cocktail'])}")
+    print(f"Sensitivity B, the DTU ROI ({len(rois['dtu'])} sensors; {res.get('roi_rule', '')}): {', '.join(rois['dtu'])}")
+    print("Sensitivity C: the whole scalp (64 sensors)")
+    return rois['cocktail'] or rois['dtu']
 
 
-def dtu_model_test(label, epoch, roi='dtu', metric='r'):
+def dtu_model_test(label, epoch, region=None, metric='r'):
     """One DTU model comparison (full model vs. without `label`), as (data, diff, result) like
-    compute_unique_contribution(). roi='dtu' (the DTU ROI) or 'cocktail' (this project's roi.txt, as a check).
-    In 'clean' the test is over the whole scalp (it finds the ROI)."""
+    compute_unique_contribution(). region: 'cocktail' (primary: this project's ROI; the default for two talkers),
+    'dtu' (sensitivity B: the DTU ROI) or 'scalp' (sensitivity C: whole scalp; the only one, and the default, for
+    'clean'). diff's ROI column averages the region's ROI (for 'scalp': the primary ROI)."""
     res = _dtu_results(epoch)
-    tests, sensors = (res['tests'], res['roi']) if roi == 'dtu' else (res['tests_cocktail'], res['roi_cocktail'])
-    data, result = tests[label]
+    region = region or ('scalp' if epoch == 'clean' else 'cocktail')
+    if region not in res['tests']:
+        raise KeyError(f"No {region!r} analysis for DTU {epoch} (available: {list(res['tests'])})")
+    data, result = res['tests'][region][label]
+    rois = res['rois']
+    sensors = rois.get(region) or (rois['dtu'] if epoch == 'clean' else rois['cocktail'])
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
     diff[f'roi_{metric}'] = diff[metric].mean(sensor=sensors)
     return data, diff, result
@@ -1751,8 +1767,8 @@ def dtu_model_test(label, epoch, roi='dtu', metric='r'):
 
 def dtu_rois(epoch='clean'):
     "(the DTU ROI, this project's ROI) as used for `epoch`"
-    res = _dtu_results(epoch)
-    return res['roi'], res.get('roi_cocktail', [])
+    rois = _dtu_results(epoch)['rois']
+    return rois['dtu'], rois['cocktail']
 
 
 def dtu_trfs(epoch):
@@ -1865,9 +1881,9 @@ def _notebook_results(notebook, namespace):
     names = set()
     record = {  # same signatures and the same names as the real functions
         'load_trfs_saved': lambda model, epoch: names.add(_result_name('trfs', _trfs_spec(model, epoch))),
-        'compute_unique_contribution': lambda full_model, predictor, epoch, roi=None, metric=None: names.add(
+        'compute_unique_contribution': lambda full_model, predictor, epoch, roi=None, metric=None, region=None: names.add(
             _result_name('test', _test_spec(f"{full_model} @ {predictor}", epoch, metric))),
-        'compute_direct_comparison': lambda model_a, model_b, epoch, roi=None, metric=None: names.add(
+        'compute_direct_comparison': lambda model_a, model_b, epoch, roi=None, metric=None, region=None: names.add(
             _result_name('test', _test_spec(f"{model_a} > {model_b}", epoch, metric))),
     }
     scope = {**namespace, **record}
@@ -2180,7 +2196,9 @@ def _job_failed(notebook, job, missing, n_needed, earlier=False):
 
 # Model comparisons
 
-def _model_test(comparison, epoch, roi, metric):
+def _model_test(comparison, epoch, roi, metric, region=None):
+    """region=None: the notebook's test region (TEST_REGION); 'whole_scalp': the whole-scalp TFCE test that every
+    saved model test holds anyway (the ROI test is recomputed from the same data), e.g. for a sensitivity analysis"""
     roi = roi if roi is not None else ANALYSIS['roi']
     metric = _setting('metric', metric)
     parameters = _setting('parameters')
@@ -2191,7 +2209,9 @@ def _model_test(comparison, epoch, roi, metric):
             comparison, **parameters, pmin=pmin, metric=metric, epoch=epoch, return_data=True)
 
     data, result = _saved_result('test', _test_spec(comparison, epoch, metric), compute)
-    if ANALYSIS['test_region'] == 'roi':
+    if region not in (None, 'whole_scalp'):
+        raise ValueError(f"region={region!r}; use None (the notebook's test region) or 'whole_scalp'")
+    if ANALYSIS['test_region'] == 'roi' and region != 'whole_scalp':
         if not roi:
             raise RuntimeError("No ROI yet: run the notebook's check_results() cell first (it reads the ROI the "
                                "clean notebook found).")
@@ -2226,14 +2246,14 @@ def tfce_summary(result):
     return f"t_max = {t_max:.2f}, {p_text}"
 
 
-def compute_unique_contribution(full_model, predictor, epoch, roi=None, metric=None):
-    "Omission comparison: does `predictor` uniquely improve on `full_model` with it removed?"
-    return _model_test(f"{full_model} @ {predictor}", epoch, roi, metric)
+def compute_unique_contribution(full_model, predictor, epoch, roi=None, metric=None, region=None):
+    "Omission comparison: does `predictor` uniquely improve on `full_model` with it removed? (region: see _model_test)"
+    return _model_test(f"{full_model} @ {predictor}", epoch, roi, metric, region)
 
 
-def compute_direct_comparison(model_a, model_b, epoch, roi=None, metric=None):
-    "Direct, non-nested comparison: does model_a fit better than model_b?"
-    return _model_test(f"{model_a} > {model_b}", epoch, roi, metric)
+def compute_direct_comparison(model_a, model_b, epoch, roi=None, metric=None, region=None):
+    "Direct, non-nested comparison: does model_a fit better than model_b? (region: see _model_test)"
+    return _model_test(f"{model_a} > {model_b}", epoch, roi, metric, region)
 
 
 def show_topomap_trio(data, diff, result, label, epoch, predictor, metric=None):
