@@ -1660,7 +1660,7 @@ def dtu_run(force=False):
     dependency = f" --dependency=afterany:{after}" if after else ''
     stats = _dtu_sbatch(f"--export=ALL,STAGE=stats --job-name=cocktail-dtu-stats "
                         f"--cpus-per-task=8 --mem=32G --time=06:00:00{dependency}")
-    submitted.append(f"the DTU ROI and group tests (job {stats})")
+    submitted.append(f"the group tests (job {stats})")
     kept = f" Already done, kept: fits of {len(state['fitted'])} subjects." if state['fitted'] else ''
     print("Submitted " + ", then ".join(submitted) + "." + kept)
     print("If the check fails, the later jobs are cancelled and dtu_progress() shows why. Follow them with "
@@ -1668,8 +1668,8 @@ def dtu_run(force=False):
 
 
 def dtu_progress():
-    """The DTU jobs still queued or running, the subject-1 check, each subject's preprocessing report, the DTU ROI and
-    the fits done. Also brings the cluster's copy of the repo up to date, so jobs that have not started yet run the
+    """The DTU jobs still queued or running, the subject-1 check, each subject's preprocessing report and the fits
+    done. Also brings the cluster's copy of the repo up to date, so jobs that have not started yet run the
     latest code."""
     folder = _dtu_folder()
     if not _on_cluster():
@@ -1684,8 +1684,6 @@ def dtu_progress():
         'echo "Check of subject 1 (raw file, trial table, triggers):"; grep -E "OK:|FAILED|S1.mat|Error" "$c" | tail -4 | sed "s/^/  /"; fi',
         'echo; echo "Preprocessing (per subject):"; ls "$d"/subjects/S*_report.txt >/dev/null 2>&1 && '
         'cat $(ls "$d"/subjects/S*_report.txt | sort -V) | sed "s/^/  /" || echo "  none yet"',
-        'echo; echo "DTU ROI (sensitivity analysis B, from DTU clean speech):"; [ -s "$d/roi.txt" ] && grep -E "^# DTU|Rule:" "$d/roi.txt" | sed "s/^/  /" '
-        '&& echo "  $(grep -v "^#" "$d/roi.txt" | tr "\n" " ")" || echo "  not made yet (made by the group-test job)"',
         'echo; echo "Fits done (subject: epochs):"; for s in "$d"/fits/S*; do [ -d "$s" ] && '
         'echo "  $(basename "$s"): $(ls "$s" | grep -v part | sed "s/.pickle//" | tr "\n" " ")"; done',
         'echo; echo "Group results:"; ls "$d"/results/*.pickle 2>/dev/null | xargs -n1 basename | sed "s/^/  /" || echo "  none yet"',
@@ -1694,7 +1692,7 @@ def dtu_progress():
 
 
 def dtu_single_talker():
-    """What the DTU single-talker trials played (they define the DTU ROI), and whether any sound other than the two
+    """What the DTU single-talker trials played, and whether any sound other than the two
     talkers' stories is speech (its length and syllable-rate envelope modulation, next to a story's). Read-only;
     runs on the login node in about a minute."""
     root = Path(_setting('cluster_repo')).parent
@@ -1726,49 +1724,38 @@ def _dtu_results(epoch):
     return _remote_results[key]
 
 
-DTU_REGIONS = {
-    'cocktail': "primary: this project's clean-speech ROI (roi.txt), pre-specified in an independent sample",
-    'dtu': "sensitivity B: the DTU ROI, from DTU's single-talker trials with this project's rule",
-    'scalp': "sensitivity C: the whole scalp, no ROI",
-}
-
-
 def dtu_setup(epoch):
-    """Read the DTU results for `epoch` and set this notebook's ROI to the primary analysis's: this project's
-    clean-speech ROI (roi.txt), pre-specified in an independent sample. Prints the subjects, trials and the ROIs of
-    the three analyses. Returns the primary ROI."""
+    """Read the DTU results for `epoch` and set this notebook's ROI to this project's clean-speech ROI (roi.txt),
+    found from the cocktail clean-speech whole-scalp tests. Every DTU two-talker test is run within it; the DTU
+    clean-speech tests run over the whole scalp, as this project's. Prints the subjects, trials and the ROI.
+    Returns the ROI."""
     res = _dtu_results(epoch)
-    rois = res['rois']
-    configure_analysis(roi=rois['cocktail'] or rois['dtu'], test_region='roi')
+    roi = res['rois']['cocktail']
+    if not roi:
+        raise RuntimeError("This project's ROI is missing from the DTU results: run the clean notebook, then dtu_run().")
+    configure_analysis(roi=roi, test_region='whole_scalp' if epoch == 'clean' else 'roi')
     trials = sorted(set(res['n_trials'].values()))
     print(f"DTU {epoch}: {res['n_subjects']} subjects, {'/'.join(map(str, trials))} trials of 50 s each.")
-    print(f"Primary ROI, this project's clean-speech ROI ({len(rois['cocktail'])} sensors): {', '.join(rois['cocktail'])}")
-    print(f"Sensitivity B, the DTU ROI ({len(rois['dtu'])} sensors; {res.get('roi_rule', '')}): {', '.join(rois['dtu'])}")
-    print("Sensitivity C: the whole scalp (64 sensors)")
-    return rois['cocktail'] or rois['dtu']
+    print(f"ROI, this project's clean-speech ROI ({len(roi)} sensors): {', '.join(roi)}")
+    if epoch == 'clean':
+        print("Model tests over the whole scalp (as this project's clean speech); ROI means and TRFs in the ROI above.")
+    else:
+        print("Every model test within the ROI above; ROI means and TRFs in the same ROI.")
+    return roi
 
 
-def dtu_model_test(label, epoch, region=None, metric='r'):
+def dtu_model_test(label, epoch, metric='r'):
     """One DTU model comparison (full model vs. without `label`), as (data, diff, result) like
-    compute_unique_contribution(). region: 'cocktail' (primary: this project's ROI; the default for two talkers),
-    'dtu' (sensitivity B: the DTU ROI) or 'scalp' (sensitivity C: whole scalp; the only one, and the default, for
-    'clean'). diff's ROI column averages the region's ROI (for 'scalp': the primary ROI)."""
+    compute_unique_contribution(): TFCE over the whole scalp for clean speech, within this project's clean-speech ROI
+    for two talkers. diff's ROI column averages that ROI."""
     res = _dtu_results(epoch)
-    region = region or ('scalp' if epoch == 'clean' else 'cocktail')
+    region = 'scalp' if epoch == 'clean' else 'cocktail'
     if region not in res['tests']:
         raise KeyError(f"No {region!r} analysis for DTU {epoch} (available: {list(res['tests'])})")
     data, result = res['tests'][region][label]
-    rois = res['rois']
-    sensors = rois.get(region) or (rois['dtu'] if epoch == 'clean' else rois['cocktail'])
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
-    diff[f'roi_{metric}'] = diff[metric].mean(sensor=sensors)
+    diff[f'roi_{metric}'] = diff[metric].mean(sensor=res['rois']['cocktail'])
     return data, diff, result
-
-
-def dtu_rois(epoch='clean'):
-    "(the DTU ROI, this project's ROI) as used for `epoch`"
-    rois = _dtu_results(epoch)['rois']
-    return rois['dtu'], rois['cocktail']
 
 
 def dtu_trfs(epoch):
@@ -1881,9 +1868,9 @@ def _notebook_results(notebook, namespace):
     names = set()
     record = {  # same signatures and the same names as the real functions
         'load_trfs_saved': lambda model, epoch: names.add(_result_name('trfs', _trfs_spec(model, epoch))),
-        'compute_unique_contribution': lambda full_model, predictor, epoch, roi=None, metric=None, region=None: names.add(
+        'compute_unique_contribution': lambda full_model, predictor, epoch, roi=None, metric=None: names.add(
             _result_name('test', _test_spec(f"{full_model} @ {predictor}", epoch, metric))),
-        'compute_direct_comparison': lambda model_a, model_b, epoch, roi=None, metric=None, region=None: names.add(
+        'compute_direct_comparison': lambda model_a, model_b, epoch, roi=None, metric=None: names.add(
             _result_name('test', _test_spec(f"{model_a} > {model_b}", epoch, metric))),
     }
     scope = {**namespace, **record}
@@ -2196,9 +2183,9 @@ def _job_failed(notebook, job, missing, n_needed, earlier=False):
 
 # Model comparisons
 
-def _model_test(comparison, epoch, roi, metric, region=None):
-    """region=None: the notebook's test region (TEST_REGION); 'whole_scalp': the whole-scalp TFCE test that every
-    saved model test holds anyway (the ROI test is recomputed from the same data), e.g. for a sensitivity analysis"""
+def _model_test(comparison, epoch, roi, metric):
+    """One model comparison in the notebook's test region (TEST_REGION): the whole scalp for clean speech, whose
+    test finds the ROI; that ROI for every two-talker condition"""
     roi = roi if roi is not None else ANALYSIS['roi']
     metric = _setting('metric', metric)
     parameters = _setting('parameters')
@@ -2209,9 +2196,7 @@ def _model_test(comparison, epoch, roi, metric, region=None):
             comparison, **parameters, pmin=pmin, metric=metric, epoch=epoch, return_data=True)
 
     data, result = _saved_result('test', _test_spec(comparison, epoch, metric), compute)
-    if region not in (None, 'whole_scalp'):
-        raise ValueError(f"region={region!r}; use None (the notebook's test region) or 'whole_scalp'")
-    if ANALYSIS['test_region'] == 'roi' and region != 'whole_scalp':
+    if ANALYSIS['test_region'] == 'roi':
         if not roi:
             raise RuntimeError("No ROI yet: run the notebook's check_results() cell first (it reads the ROI the "
                                "clean notebook found).")
@@ -2246,14 +2231,14 @@ def tfce_summary(result):
     return f"t_max = {t_max:.2f}, {p_text}"
 
 
-def compute_unique_contribution(full_model, predictor, epoch, roi=None, metric=None, region=None):
-    "Omission comparison: does `predictor` uniquely improve on `full_model` with it removed? (region: see _model_test)"
-    return _model_test(f"{full_model} @ {predictor}", epoch, roi, metric, region)
+def compute_unique_contribution(full_model, predictor, epoch, roi=None, metric=None):
+    "Omission comparison: does `predictor` uniquely improve on `full_model` with it removed?"
+    return _model_test(f"{full_model} @ {predictor}", epoch, roi, metric)
 
 
-def compute_direct_comparison(model_a, model_b, epoch, roi=None, metric=None, region=None):
-    "Direct, non-nested comparison: does model_a fit better than model_b? (region: see _model_test)"
-    return _model_test(f"{model_a} > {model_b}", epoch, roi, metric, region)
+def compute_direct_comparison(model_a, model_b, epoch, roi=None, metric=None):
+    "Direct, non-nested comparison: does model_a fit better than model_b?"
+    return _model_test(f"{model_a} > {model_b}", epoch, roi, metric)
 
 
 def show_topomap_trio(data, diff, result, label, epoch, predictor, metric=None):
