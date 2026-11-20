@@ -1478,7 +1478,8 @@ def _dtu_folder():
 
 def _dtu_state():
     """What is already done for the DTU dataset on the cluster, read in one go: download running/complete,
-    inspection report, DTU jobs queued or running, predictors/EEG made, subjects fitted, group tests done"""
+    inspection report, DTU jobs queued or running, predictors made, overt/masked onsets made, subjects fitted (every
+    model, the overt/masked ones included), group tests done"""
     folder = _dtu_folder()
     script = '\n'.join([
         f'd={folder}',
@@ -1489,8 +1490,9 @@ def _dtu_state():
         '[ -s "$d/inspect_report.txt" ] && ! grep -q "Not there yet" "$d/inspect_report.txt" && echo inspected=1',
         'echo "jobs=$(squeue -u "${USER:-$(whoami)}" -h -o "%j" 2>/dev/null | grep "^cocktail-dtu" | sort -u | tr "\\n" " ")"',
         '[ -s "$d/derivatives/prepare_report.txt" ] && echo prepared=1',
-        'echo "fitted=$(for f in "$d"/derivatives/raw/fits/S*/DONE; do [ -e "$f" ] && basename "$(dirname "$f")" | tr -d S; done | tr "\\n" " ")"',
-        'r="$d/derivatives/raw/results/DONE"; if [ -e "$r" ] && [ -z "$(find "$d/derivatives/raw/fits" -name DONE -newer "$r" 2>/dev/null)" ]; '
+        '[ -s "$d/derivatives/split_report.txt" ] && echo split=1',
+        'echo "fitted=$(for f in "$d"/derivatives/raw/fits/S*/DONE2; do [ -e "$f" ] && basename "$(dirname "$f")" | tr -d S; done | tr "\\n" " ")"',
+        'r="$d/derivatives/raw/results/DONE"; if [ -e "$r" ] && [ -z "$(find "$d/derivatives/raw/fits" -name DONE2 -newer "$r" 2>/dev/null)" ]; '
         'then echo stats_done=1; fi',
     ])
     out = _cluster(f"bash -lc {shlex.quote(script)}").stdout.decode()
@@ -1501,6 +1503,7 @@ def _dtu_state():
         'inspected': 'inspected' in state,
         'jobs': state.get('jobs', '').split(),
         'prepared': 'prepared' in state,
+        'split': 'split' in state,
         'fitted': sorted(int(s) for s in state.get('fitted', '').split()),
         'stats_done': 'stats_done' in state,
     }
@@ -1607,9 +1610,10 @@ def _dtu_sbatch(args, script='cluster/dtu_analysis.sbatch'):
 def dtu_run(force=False):
     """Run the DTU forward-model analysis on the cluster (dtu/dtu_pipeline.py), aligned with this project's: the raw
     EEG preprocessed as this project's, then the two-talker fits and tests in this project's ROI (roi.txt, from the
-    cocktail clean-speech analysis). DTU's single-talker trials are not analysed. Jobs: the story predictors (once), a quick check on
+    cocktail clean-speech analysis), with the overt/masked models. DTU's single-talker trials are not analysed. Jobs: the story predictors (once), a quick check on
     subject 1 that the raw file, trial table and triggers can be read (the subject jobs start only if it passes),
-    one job per subject (preprocessing and fits, in parallel), and the group tests. Hours; the Mac can be closed.
+    the overt/masked onsets of every mixture (once), one job per subject (preprocessing and fits, in parallel), and
+    the group tests. Hours; the Mac can be closed.
     Follow it with dtu_progress().
 
     Submits only what is missing, so Run All is safe: nothing if the results are complete or DTU jobs are queued
@@ -1628,7 +1632,8 @@ def dtu_run(force=False):
         return
     todo = [s for s in range(1, 19) if s not in state['fitted']]
     if not todo and state['stats_done'] and not force:
-        print("The DTU analysis is complete: open dtu_all.ipynb and the room notebooks. "
+        print("The DTU analysis is complete: open dtu_all.ipynb, the room notebooks and their _overt_masked_onsets "
+              "notebooks. "
               "dtu_run(force=True) reruns the group tests.")
         return
     if _on_cluster():
@@ -1653,8 +1658,15 @@ def dtu_run(force=False):
         check = _dtu_sbatch(f"--export=ALL,STAGE=rawcheck --job-name=cocktail-dtu-rawcheck "
                             f"--cpus-per-task=2 --mem=16G --time=00:30:00{dependency}")
         submitted.append(f"the check of subject 1's raw file, trial table and triggers (job {check})")
+        before = [check]
+        if not state['split']:
+            split = _dtu_sbatch(f"--export=ALL,STAGE=split --job-name=cocktail-dtu-split "
+                                f"--cpus-per-task=16 --mem=96G --time=12:00:00 --dependency=afterok:{check} "
+                                f"--kill-on-invalid-dep=yes")
+            submitted.append(f"the overt/masked onsets of every mixture (job {split})")
+            before.append(split)
         after = _dtu_sbatch(f"--export=ALL,STAGE=fit --job-name=cocktail-dtu-fit --array={','.join(map(str, todo))} "
-                            f"--cpus-per-task=8 --mem=48G --time=2-00:00:00 --dependency=afterok:{check} "
+                            f"--cpus-per-task=8 --mem=48G --time=2-00:00:00 --dependency=afterok:{':'.join(before)} "
                             f"--kill-on-invalid-dep=yes")
         submitted.append(f"preprocessing and fits of {len(todo)} subject{'s' if len(todo) > 1 else ''} (job {after})")
     dependency = f" --dependency=afterany:{after}" if after else ''
@@ -1664,7 +1676,8 @@ def dtu_run(force=False):
     kept = f" Already done, kept: fits of {len(state['fitted'])} subjects." if state['fitted'] else ''
     print("Submitted " + ", then ".join(submitted) + "." + kept)
     print("If the check fails, the later jobs are cancelled and dtu_progress() shows why. Follow them with "
-          "dtu_progress(); dtu_all.ipynb and the room notebooks read the results at the end.")
+          "dtu_progress(); dtu_all.ipynb, the room notebooks and their _overt_masked_onsets notebooks read the "
+          "results at the end.")
 
 
 def dtu_progress():
@@ -1684,6 +1697,7 @@ def dtu_progress():
         'echo "Check of subject 1 (raw file, trial table, triggers):"; grep -E "OK:|FAILED|S1.mat|Error" "$c" | tail -4 | sed "s/^/  /"; fi',
         'echo; echo "Preprocessing (per subject):"; ls "$d"/subjects/S*_report.txt >/dev/null 2>&1 && '
         'cat $(ls "$d"/subjects/S*_report.txt | sort -V) | sed "s/^/  /" || echo "  none yet"',
+        'echo; echo "Overt/masked onsets:"; [ -s "$d/../split_report.txt" ] && sed "s/^/  /" "$d/../split_report.txt" || echo "  not made yet"',
         'echo; echo "Fits done (subject: epochs):"; for s in "$d"/fits/S*; do [ -d "$s" ] && '
         'echo "  $(basename "$s"): $(ls "$s" | grep -v part | sed "s/.pickle//" | tr "\n" " ")"; done',
         'echo; echo "Group results:"; ls "$d"/results/*.pickle 2>/dev/null | xargs -n1 basename | sed "s/^/  /" || echo "  none yet"',
@@ -1691,31 +1705,33 @@ def dtu_progress():
     print(_cluster(f"bash -lc {shlex.quote(script)}").stdout.decode().rstrip())
 
 
-def _dtu_results(epoch):
-    "The DTU group results for `epoch` (dtu_pipeline.py stats), read from the cluster once per session"
+def _dtu_results(epoch, analysis=''):
+    """The DTU group results for `epoch` (dtu_pipeline.py stats), read from the cluster once per session.
+    analysis: '' (the main models) or 'overt-masked' (the overt/masked notebooks' models)"""
     if epoch not in DTU_EPOCHS:
         raise ValueError(f"epoch={epoch!r}; choose from {DTU_EPOCHS}")
-    key = f'dtu-{epoch}'
+    name = f"{epoch}{'-' + analysis if analysis else ''}"
+    key = f'dtu-{name}'
     if key not in _remote_results:
-        path = f"{_dtu_folder()}/derivatives/raw/results/{epoch}.pickle"
+        path = f"{_dtu_folder()}/derivatives/raw/results/{name}.pickle"
         if _on_cluster() or ANALYSIS['results_mode'] == 'compute':
-            local = Path.home() / Path(_setting('cluster_repo')).parent / 'dataset' / 'dtu' / 'derivatives' / 'raw' / 'results' / f'{epoch}.pickle'
+            local = Path.home() / Path(_setting('cluster_repo')).parent / 'dataset' / 'dtu' / 'derivatives' / 'raw' / 'results' / f'{name}.pickle'
             data = local.read_bytes() if local.exists() else None
         else:
             proc = _cluster(f"bash -lc {shlex.quote(f'if [ -f {path} ]; then cat {path}; else exit 3; fi')}")
             data = None if proc.returncode == 3 else proc.stdout
         if not data:
-            raise FileNotFoundError(f"No DTU results for {epoch!r} on the cluster yet: run dtu_run() in dtu.ipynb "
+            raise FileNotFoundError(f"No DTU results for {name!r} on the cluster yet: run dtu_run() in dtu.ipynb "
                                     f"and wait for its last job (dtu_progress()).")
         _remote_results[key] = pickle.loads(data)
     return _remote_results[key]
 
 
-def dtu_setup(epoch):
+def dtu_setup(epoch, analysis=''):
     """Read the DTU two-talker results for `epoch` and set this notebook's ROI to this project's clean-speech ROI
     (roi.txt), found from the cocktail clean-speech whole-scalp tests. Every DTU test is run within it. Prints the
     subjects, trials and the ROI. Returns the ROI."""
-    res = _dtu_results(epoch)
+    res = _dtu_results(epoch, analysis)
     roi = res['rois']['cocktail']
     if not roi:
         raise RuntimeError("This project's ROI is missing from the DTU results: run the clean notebook, then dtu_run().")
@@ -1727,19 +1743,20 @@ def dtu_setup(epoch):
     return roi
 
 
-def dtu_model_test(label, epoch, metric='r'):
+def dtu_model_test(label, epoch, analysis='', metric='r'):
     """One DTU two-talker model comparison (full model vs. without `label`), as (data, diff, result) like
     compute_unique_contribution(): TFCE within this project's clean-speech ROI. diff's ROI column averages that ROI."""
-    res = _dtu_results(epoch)
+    res = _dtu_results(epoch, analysis)
     data, result = res['tests']['cocktail'][label]
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
     diff[f'roi_{metric}'] = diff[metric].mean(sensor=res['rois']['cocktail'])
     return data, diff, result
 
 
-def dtu_trfs(epoch):
-    "All DTU subjects' full-model TRFs for `epoch`, with the same columns as load_trfs_saved(FULL_BASE, ...)"
-    return _dtu_results(epoch)['trfs']
+def dtu_trfs(epoch, analysis=''):
+    """All DTU subjects' full-model TRFs for `epoch`, with the same columns as load_trfs_saved(FULL_BASE, ...);
+    analysis='overt-masked': the overt/masked model's (FULL_MASKED's overt and masked onset columns)"""
+    return _dtu_results(epoch, analysis)['trfs']
 
 
 # Files made by code that has since been replaced (relative to the dataset's

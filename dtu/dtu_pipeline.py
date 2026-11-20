@@ -15,6 +15,13 @@ Aligned with this project, step for step:
           the ears is not available)
   TRFs    the same boosting settings (-100 to 400 ms, 50 ms basis, l1, selective stopping, cross-validated)
   Trials  only the 60 two-talker trials are analysed; the single-talker trials are not
+  Overt/masked  as this project's overt/masked notebooks (predictors/brodbeck2020_predictors.py, recipe 'log'):
+          each talker's onsets split at full resolution (128 bands, before binning) into the part still in the
+          mixture's onsets (overt = min(talker, mixture)) and the part the other talker covers (masked =
+          max(talker - mixture, 0)), so overt + masked == the talker's onsets; and the mixture's onsets in three
+          intensity tiers (tertiles pooled over every mixture, per band) for the level-aware control. The
+          mixture is the two dry talkers summed, as for the other predictors (the rooms were simulated at
+          presentation), so the split does not include the rooms' reverberation
   Tests   within this project's clean-speech ROI (roi.txt, from the cocktail clean-speech whole-scalp tests),
           as this project's two-talker notebooks (one-tailed TFCE in the ROI, and the ROI-averaged t-test)
 
@@ -22,7 +29,8 @@ Stages (python dtu/dtu_pipeline.py <stage> [subject]):
   prepare      the story predictors, once
   rawcheck     a quick check on subject 1 that the raw file, the trial table and the triggers can be read and
                agree; the subject jobs only start if it passes
-  fit S        one subject: preprocessing (once), then the two-talker fits (full model, without each predictor, without each stream; all rooms and
+  split        the overt/masked onsets and the mixture's intensity tiers of every two-talker mixture, once
+  fit S        one subject: preprocessing (once), then the two-talker fits (incl. the overt/masked models) (full model, without each predictor, without each stream; all rooms and
                each room). Saved model by model, so it resumes.
   stats        the group tests within this project's ROI and the TRFs, read by the dtu_*.ipynb
 """
@@ -73,6 +81,28 @@ ALL_COLUMNS = [c for cs in COLUMNS.values() for c in cs]
 MODELS = {'full': ALL_COLUMNS}
 MODELS.update({f'no_{c}': [x for x in ALL_COLUMNS if x != c] for c in ALL_COLUMNS})
 MODELS.update({f'no_{s}_stream': [x for x in ALL_COLUMNS if x not in COLUMNS[s]] for s in COLUMNS})
+# The overt/masked notebooks' models (analysis/parameters.py FULL_MASKED, LEVEL_AWARE, ...). The DTU mixture is
+# the two talkers summed at the levels they were played at, so the onsets "at their level in the mixture"
+# (FULL_INMIX) are the onsets of the main models: 'full' stands in for FULL_INMIX.
+SPLIT = 'gammatone_log'  # column names as in this project's overt/masked TRFs (SPLIT_RECIPE = 'log')
+SPLIT_COLUMNS = {  # column -> (role, kind)
+    f'{SPLIT}_on_overt_8': ('attend', 'overt'), f'{SPLIT}_on_masked_8': ('attend', 'masked'),
+    f'bg_{SPLIT}_on_overt_8': ('ignore', 'overt'), f'bg_{SPLIT}_on_masked_8': ('ignore', 'masked'),
+    f'mix_{SPLIT}_on_low_8': ('mix', 'low'), f'mix_{SPLIT}_on_mid_8': ('mix', 'mid'),
+    f'mix_{SPLIT}_on_high_8': ('mix', 'high'),
+}
+TIERS = ('low', 'mid', 'high')
+_ENVELOPES = ['gammatone_8', 'bg_gammatone_8', 'mix_gammatone_8']
+_SPLIT_ONSETS = {('attend', 'overt'): f'{SPLIT}_on_overt_8', ('attend', 'masked'): f'{SPLIT}_on_masked_8',
+                 ('ignore', 'overt'): f'bg_{SPLIT}_on_overt_8', ('ignore', 'masked'): f'bg_{SPLIT}_on_masked_8'}
+MASKED_FULL = _ENVELOPES + list(_SPLIT_ONSETS.values()) + ['mix_gammatone_on_8']
+MODELS['masked_full'] = MASKED_FULL
+for (role, kind), column in _SPLIT_ONSETS.items():
+    MODELS[f'masked_no_{kind}_{role}'] = [c for c in MASKED_FULL if c != column]
+for role in ('attend', 'ignore'):
+    MODELS[f'masked_no_{role}_onsets'] = [c for c in MASKED_FULL if c not in (_SPLIT_ONSETS[role, 'overt'], _SPLIT_ONSETS[role, 'masked'])]
+MODELS['level_aware'] = ['gammatone_8', 'gammatone_on_8', 'bg_gammatone_8', 'mix_gammatone_8'] + [f'mix_{SPLIT}_on_{t}_8' for t in TIERS]
+OVERT_MASKED_MODELS = [m for m in MODELS if m == 'level_aware' or m.startswith('masked_')]
 if 'DTU_TEST_MODELS' in os.environ:  # only for testing the mechanics quickly elsewhere
     MODELS = {m: MODELS[m] for m in os.environ['DTU_TEST_MODELS'].split()}
 # The comparisons the notebook reports: label -> reduced model (each tested against the full model)
@@ -82,6 +112,22 @@ COMPARISONS = {
     'Attend stream': 'no_attend_stream', 'Ignore stream': 'no_ignore_stream', 'Mix stream': 'no_mix_stream',
 }
 COMPARISONS = {label: model for label, model in COMPARISONS.items() if model in MODELS}
+# The overt/masked notebooks' comparisons: label -> (model, reduced model), labels as in those notebooks
+OVERT_MASKED_COMPARISONS = {
+    'Overt/masked split vs. plain onsets': ('masked_full', 'full'),
+    'Overt onset attend': ('masked_full', 'masked_no_overt_attend'),
+    'Overt onset ignore': ('masked_full', 'masked_no_overt_ignore'),
+    'Masked onset attend': ('masked_full', 'masked_no_masked_attend'),
+    'Masked onset ignore': ('masked_full', 'masked_no_masked_ignore'),
+    'Overt + masked onsets attend, together': ('masked_full', 'masked_no_attend_onsets'),
+    'Overt + masked onsets ignore, together': ('masked_full', 'masked_no_ignore_onsets'),
+    'Onset attend at its level in the mixture': ('full', 'no_gammatone_on_8'),
+    'Onset ignore at its level in the mixture': ('full', 'no_bg_gammatone_on_8'),
+    'Masked-aware vs. level-aware': ('masked_full', 'level_aware'),
+}
+OVERT_MASKED_COMPARISONS = {k: v for k, v in OVERT_MASKED_COMPARISONS.items() if set(v) <= set(MODELS)}
+FIT_DONE = 'DONE2'  # per-subject marker: every model fitted, the overt/masked ones included (DONE: before them)
+SPLIT_REPORT = DERIV / 'split_report.txt'
 
 
 def log(*args):
@@ -119,22 +165,31 @@ def _wav_array(name):
     return rate, (x.mean(1) if x.ndim == 2 else x)
 
 
-def _predictors_from_audio(rate, x):
-    "8-band envelope and onset predictors at 64 Hz, N_TIMES long, as predictors/gammatone_predictors.py"
-    from eelbrain import NDVar, UTS, gammatone_bank, edge_detector
+def _gammatone_log(rate, x):
+    "128-band gammatone spectrogram (80-8,000 Hz, 1 ms), log(x + 1), as predictors/gammatone_predictors.py"
+    from eelbrain import NDVar, UTS, gammatone_bank
     wav = NDVar(x, (UTS(0, 1 / rate, len(x)),), name='wav')
     gt = gammatone_bank(wav, 80, 8000, 128, location='left', tstep=0.001)
-    gt_log = (gt + 1).log()
+    return (gt + 1).log()
+
+
+def _to_predictor(y, binned=False):
+    "A 1 ms spectrogram as a predictor: 8 bands (summed; unless already `binned`), 64 Hz, N_TIMES long"
+    from eelbrain import NDVar, UTS
+    y8 = y if binned else y.bin(nbins=8, func='sum', dim='frequency')
+    y8 = y8.bin(1 / FS, dim='time', func='mean', label='start')
+    data = y8.get_data(('frequency', 'time'))[:, :N_TIMES]
+    if data.shape[1] < N_TIMES:
+        data = numpy.pad(data, ((0, 0), (0, N_TIMES - data.shape[1])))
+    return NDVar(data, (y8.get_dim('frequency'), UTS(0, 1 / FS, N_TIMES)))
+
+
+def _predictors_from_audio(rate, x):
+    "8-band envelope and onset predictors at 64 Hz, N_TIMES long, as predictors/gammatone_predictors.py"
+    from eelbrain import edge_detector
+    gt_log = _gammatone_log(rate, x)
     onset = edge_detector(gt_log, c=30)
-    out = {}
-    for kind, y in (('env', gt_log), ('on', onset)):
-        y8 = y.bin(nbins=8, func='sum', dim='frequency')
-        y8 = y8.bin(1 / FS, dim='time', func='mean', label='start')
-        data = y8.get_data(('frequency', 'time'))[:, :N_TIMES]
-        if data.shape[1] < N_TIMES:
-            data = numpy.pad(data, ((0, 0), (0, N_TIMES - data.shape[1])))
-        out[kind] = NDVar(data, (y8.get_dim('frequency'), UTS(0, 1 / FS, N_TIMES)))
-    return out
+    return {'env': _to_predictor(gt_log), 'on': _to_predictor(onset)}
 
 
 def _make_story(name):
@@ -161,6 +216,131 @@ def _story_envelope(name):
     "Broadband envelope at 64 Hz, to recognise which story a trial's wavA/wavB envelope came from"
     p = load(PRED_DIR / f'{name}.pickle')['env']
     return p.sum('frequency').get_data('time')
+
+
+# ---------------------------------------------------------------------------------------------- overt/masked
+
+def _split_key(a, b):
+    return 'split~' + '~'.join(sorted((a, b)))
+
+
+def _pairs():
+    "Every two-talker (male, female) story pair played to any subject, from the trial tables"
+    pairs = set()
+    for subject in SUBJECTS:
+        path = SUBJ_DIR / f'S{subject}.pickle'
+        if path.exists():
+            ds = load(path)
+            pairs.update(tuple(sorted((ds[i, 'attended'], ds[i, 'ignored'])))
+                         for i in range(ds.n_cases) if ds[i, 'n_speakers'] == 2)
+            continue
+        info = _expinfo(subject, [])
+        if not info:
+            raise SystemExit(f"S{subject}: the trial table could not be read")
+        for row in info:
+            male, female = _text(row.get('wavfile_male')), _text(row.get('wavfile_female'))
+            if male and female:
+                pairs.add(tuple(sorted((male, female))))
+    return sorted(pairs)
+
+
+def _story_onsets(args):
+    "A story's 128-band onsets (1 ms), saved to the scratch folder"
+    name, scratch = args
+    path = scratch / f'{name}.on.npy'
+    if not path.exists():
+        from eelbrain import edge_detector
+        on = edge_detector(_gammatone_log(*_wav_array(name)), c=30)
+        numpy.save(path, on.get_data(('frequency', 'time')).astype(numpy.float32))
+    return name
+
+
+def _split_pair(args):
+    """One mixture: each talker's overt and masked onsets (8 bands, 64 Hz) and the mixture's 8-band 1 ms onsets
+    (saved to the scratch folder for the intensity tiers); checks that overt + masked == the talker's onsets"""
+    (a, b), scratch = args
+    from eelbrain import NDVar, UTS, edge_detector
+    rate_a, xa = _wav_array(a)
+    rate_b, xb = _wav_array(b)
+    assert rate_a == rate_b, (a, b, rate_a, rate_b)
+    n = max(len(xa), len(xb))
+    mix_on = edge_detector(_gammatone_log(rate_a, numpy.pad(xa, (0, n - len(xa))) + numpy.pad(xb, (0, n - len(xb)))), c=30)
+    freq = mix_on.get_dim('frequency')
+    mix_x = mix_on.get_data(('frequency', 'time'))
+    out = {'overt': {}, 'masked': {}}
+    worst = 0.
+    for name in (a, b):
+        src = numpy.load(scratch / f'{name}.on.npy').astype(float)
+        m = min(src.shape[1], mix_x.shape[1])
+        src, mix_m = src[:, :m], mix_x[:, :m]
+        for kind, x in (('overt', numpy.minimum(src, mix_m)), ('masked', numpy.clip(src - mix_m, 0, None))):
+            out[kind][name] = _to_predictor(NDVar(x, (freq, UTS(0, 0.001, m))))
+        whole = load(PRED_DIR / f'{name}.pickle')['on'].get_data(('frequency', 'time'))
+        parts = (out['overt'][name] + out['masked'][name]).get_data(('frequency', 'time'))
+        worst = max(worst, float(numpy.abs(parts - whole).max() / (numpy.abs(whole).max() or 1)))
+    mix8 = NDVar(mix_x, (freq, UTS(0, 0.001, mix_x.shape[1]))).bin(nbins=8, func='sum', dim='frequency')
+    numpy.save(scratch / f'{_split_key(a, b)}.mix8.npy', mix8.get_data(('frequency', 'time')).astype(numpy.float32))
+    save({'freq8': mix8.get_dim('frequency'), **out}, scratch / f'{_split_key(a, b)}.pickle')
+    share = {name: float(out['masked'][name].sum() / ((out['overt'][name] + out['masked'][name]).sum() or 1)) for name in (a, b)}
+    return (a, b), worst, share
+
+
+def split():
+    """The overt/masked onsets of every two-talker mixture, and the mixture onsets' intensity tiers (cutoffs pooled
+    over every mixture, per band), as predictors/brodbeck2020_predictors.py (recipe 'log'). Saved as
+    predictors/split~<story>~<story>.pickle; SPLIT_REPORT marks it done."""
+    import shutil
+    import tempfile
+    from eelbrain import NDVar, UTS
+    pairs = _pairs()
+    stories = sorted({s for pair in pairs for s in pair})
+    for name in stories:
+        _make_story(name)
+    scratch = Path(tempfile.mkdtemp(prefix='dtu-split-', dir=os.environ.get('SLURM_TMPDIR') or None))
+    workers = max(1, min(cpus() // 2, 8))  # each gammatone filterbank holds a few GB
+    log(f"{len(pairs)} mixtures of {len(stories)} stories; 128-band onsets ({workers} at a time)")
+    try:
+        with Pool(workers) as pool:
+            for _ in pool.imap_unordered(_story_onsets, [(s, scratch) for s in stories]):
+                pass
+            worst, shares = 0., []
+            for pair, error, share in pool.imap_unordered(_split_pair, [(p, scratch) for p in pairs]):
+                worst = max(worst, error)
+                shares.extend(share.values())
+        log(f"overt + masked vs. the talkers' onsets: largest relative difference {worst:.2g}")
+        # Intensity tiers: each onset (a run of non-zero samples in one band) by its summed intensity
+        intensities, runs = [[] for _ in range(8)], {}
+        for pair in pairs:
+            x = numpy.load(scratch / f'{_split_key(*pair)}.mix8.npy')
+            runs[pair] = []
+            for band in range(8):
+                on = numpy.concatenate(([0], (x[band] != 0).astype(int), [0]))
+                starts, stops = numpy.flatnonzero(numpy.diff(on) == 1), numpy.flatnonzero(numpy.diff(on) == -1)
+                for a, b in zip(starts, stops):
+                    intensities[band].append(float(x[band, a:b].sum()))
+                    runs[pair].append((band, a, b))
+        cuts = [numpy.percentile(v, [100 / 3, 200 / 3]) for v in intensities]
+        for pair in pairs:
+            key = _split_key(*pair)
+            x = numpy.load(scratch / f'{key}.mix8.npy').astype(float)
+            result = load(scratch / f'{key}.pickle')
+            tiers = {t: numpy.zeros_like(x) for t in TIERS}
+            for band, a, b in runs[pair]:
+                total = x[band, a:b].sum()
+                t = 'low' if total <= cuts[band][0] else 'mid' if total <= cuts[band][1] else 'high'
+                tiers[t][band, a:b] = x[band, a:b]
+            for t in TIERS:
+                result[t] = _to_predictor(NDVar(tiers[t], (result['freq8'], UTS(0, 0.001, x.shape[1]))), binned=True)
+            del result['freq8']
+            save(result, PRED_DIR / f'{key}.pickle')
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    SPLIT_REPORT.write_text(
+        f"{len(pairs)} mixtures of {len(stories)} stories split into overt and masked onsets; masked share of the "
+        f"talkers' onsets: median {numpy.median(shares):.0%} (range {min(shares):.0%}-{max(shares):.0%}); "
+        f"overt + masked vs. the talkers' onsets: largest relative difference {worst:.2g}; made "
+        f"{time.strftime('%Y-%m-%d %H:%M')}\n")
+    log(SPLIT_REPORT.read_text().strip())
 
 
 # ---------------------------------------------------------------------------------------------- trial table
@@ -535,6 +715,8 @@ def _trial_predictors(ds, index, columns):
             path = PRED_DIR / f'{key}.pickle'
             if not path.exists() and key.startswith('mix~'):
                 _make_mix(tuple(key.split('~')[1:]))
+            if not path.exists() and key.startswith('split~'):
+                raise SystemExit(f"{path.name} is missing: run the split stage first (dtu_run() does)")
             cache[key] = load(path)
         return cache[key]
 
@@ -543,6 +725,12 @@ def _trial_predictors(ds, index, columns):
         attended, ignored = ds[i, 'attended'], ds[i, 'ignored']
         sources = {'': attended, 'bg_': ignored, 'mix_': f'mix~{attended}~{ignored}'}
         for c in columns:
+            if c in SPLIT_COLUMNS:
+                role, kind = SPLIT_COLUMNS[c]
+                p = get(_split_key(attended, ignored))
+                x = p[kind] if role == 'mix' else p[kind][attended if role == 'attend' else ignored]
+                out[c].append(x.copy(c))
+                continue
             prefix = re.match(r'^(bg_|mix_)?', c).group(0)
             p = get(sources[prefix])
             out[c].append((p['on'] if '_on_' in c else p['env']).copy(c))
@@ -569,6 +757,8 @@ def _fit_models(subject, epoch, ds, index, models):
         done['r'][model] = res.r
         if model == 'full':
             done['h'] = {h.name: h for h in res.h}
+        elif model == 'masked_full':
+            done['h_masked'] = {h.name: h for h in res.h}
         save(done, path)
         log(f"S{subject} {epoch} {model}: r = {float(res.r.mean()):.4f} ({time.time() - started:.0f} s)")
 
@@ -579,12 +769,14 @@ def fit(subject):
     path = SUBJ_DIR / f'S{subject}.pickle'
     ds = load(path) if path.exists() else preprocess(subject)
     two = numpy.asarray(ds['n_speakers'].x == 2)  # the single-talker trials are not analysed
+    if any(c in SPLIT_COLUMNS for cs in MODELS.values() for c in cs) and not SPLIT_REPORT.exists():
+        raise SystemExit("The overt/masked predictors are not made yet: run the split stage first (dtu_run() does)")
     for epoch in EPOCHS:
         index = two if epoch == 'all' else two & numpy.asarray(ds['room'] == epoch)
         if index.sum() >= 5:
             _fit_models(subject, epoch, ds, index, MODELS)
     # Marker read by dtu_run() in the notebook: this subject needs no more fitting
-    (FIT_DIR / f'S{subject}' / 'DONE').write_text(time.strftime('%F %T') + '\n')
+    (FIT_DIR / f'S{subject}' / FIT_DONE).write_text(time.strftime('%F %T') + '\n')
     log(f"S{subject} done")
 
 
@@ -618,11 +810,11 @@ def _test(loaded, full, reduced, sensors, samples):
     return data, result
 
 
-def _trfs(loaded, columns):
+def _trfs(loaded, columns, key='h'):
     from eelbrain import Dataset, Factor, combine
     trfs = Dataset({'subject': Factor([f'S{s}' for s in loaded], random=True)})
     for column in columns:
-        trfs[column] = combine([f['h'][column] for f in loaded.values()])
+        trfs[column] = combine([f[key][column] for f in loaded.values()])
     return trfs
 
 
@@ -635,8 +827,9 @@ def stats(samples=10000):
         raise SystemExit(f"This project's ROI ({COCKTAIL_ROI}) is missing: run the clean notebook first")
 
     # The two-talker tests, within this project's ROI
+    base_models = [m for m in MODELS if m not in OVERT_MASKED_MODELS]
     for epoch in EPOCHS:
-        loaded = _complete(epoch, MODELS)
+        loaded = _complete(epoch, base_models)
         if len(loaded) < 3:
             log(f"{epoch}: only {len(loaded)} subjects; skipped")
             continue
@@ -652,6 +845,26 @@ def stats(samples=10000):
               'n_subjects': len(loaded), 'n_trials': {f'S{s}': f['n_trials'] for s, f in loaded.items()}},
              RESULT_DIR / f'{epoch}.pickle')
         summary[epoch] = {'subjects': len(loaded)}
+
+        # The overt/masked notebooks' tests, also within this project's ROI
+        needed = sorted({m for pair in OVERT_MASKED_COMPARISONS.values() for m in pair})
+        if not OVERT_MASKED_COMPARISONS:
+            continue
+        loaded = _complete(epoch, needed)
+        if len(loaded) < 3:
+            log(f"{epoch} overt/masked: only {len(loaded)} subjects have every overt/masked model; skipped")
+            continue
+        tests = {'cocktail': {}}
+        for label, (full, reduced) in OVERT_MASKED_COMPARISONS.items():
+            tests['cocktail'][label] = _test(loaded, full, reduced, rois['cocktail'], samples)
+            result = tests['cocktail'][label][1]
+            log(f"{epoch} {label} (this project's ROI): t_max = {float(numpy.nanmax(result.t.x)):.2f}, "
+                f"p = {float(numpy.nanmin(result.p.x)):.3f}")
+        masked = MODELS['masked_full'] if 'masked_full' in needed else []
+        save({'tests': tests, 'trfs': _trfs(loaded, masked, 'h_masked'), 'rois': rois,
+              'n_subjects': len(loaded), 'n_trials': {f'S{s}': f['n_trials'] for s, f in loaded.items()}},
+             RESULT_DIR / f'{epoch}-overt-masked.pickle')
+        summary[f'{epoch}-overt-masked'] = {'subjects': len(loaded)}
     (RESULT_DIR / 'summary.json').write_text(json.dumps(summary, indent=1))
     (RESULT_DIR / 'DONE').write_text(time.strftime('%F %T') + '\n')  # read by dtu_run()
     log("stats done")
@@ -663,9 +876,11 @@ if __name__ == '__main__':
         prepare()
     elif stage == 'rawcheck':
         rawcheck()
+    elif stage == 'split':
+        split()
     elif stage == 'fit':
         fit(int(sys.argv[2]))
     elif stage == 'stats':
         stats(int(os.environ.get('DTU_SAMPLES', 10000)))
     else:
-        raise SystemExit(f"Unknown stage {stage!r}: prepare, rawcheck, fit <subject> or stats")
+        raise SystemExit(f"Unknown stage {stage!r}: prepare, rawcheck, split, fit <subject> or stats")
