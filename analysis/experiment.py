@@ -1590,7 +1590,7 @@ def dtu_inspect(poll=30, force=False):
     print(_job_log(job, 1000))
 
 
-DTU_EPOCHS = ('clean', 'all', 'anechoic', 'mild', 'high')
+DTU_EPOCHS = ('all', 'anechoic', 'mild', 'high')
 
 
 def _dtu_sbatch(args, script='cluster/dtu_analysis.sbatch'):
@@ -1606,8 +1606,8 @@ def _dtu_sbatch(args, script='cluster/dtu_analysis.sbatch'):
 
 def dtu_run(force=False):
     """Run the DTU forward-model analysis on the cluster (dtu/dtu_pipeline.py), aligned with this project's: the raw
-    EEG preprocessed as this project's, the ROI from DTU's own clean-speech (single-talker) trials with this
-    project's rule, then the two-talker tests in that ROI. Jobs: the story predictors (once), a quick check on
+    EEG preprocessed as this project's, then the two-talker fits and tests in this project's ROI (roi.txt, from the
+    cocktail clean-speech analysis). DTU's single-talker trials are not analysed. Jobs: the story predictors (once), a quick check on
     subject 1 that the raw file, trial table and triggers can be read (the subject jobs start only if it passes),
     one job per subject (preprocessing and fits, in parallel), and the group tests. Hours; the Mac can be closed.
     Follow it with dtu_progress().
@@ -1628,8 +1628,8 @@ def dtu_run(force=False):
         return
     todo = [s for s in range(1, 19) if s not in state['fitted']]
     if not todo and state['stats_done'] and not force:
-        print("The DTU analysis is complete: open dtu_clean.ipynb (the ROI), then dtu_all.ipynb and the room "
-              "notebooks. dtu_run(force=True) reruns the group tests.")
+        print("The DTU analysis is complete: open dtu_all.ipynb and the room notebooks. "
+              "dtu_run(force=True) reruns the group tests.")
         return
     if _on_cluster():
         print("Note: mat-io (which reads the DTU trial table) can only be installed from a login node; if the check "
@@ -1664,7 +1664,7 @@ def dtu_run(force=False):
     kept = f" Already done, kept: fits of {len(state['fitted'])} subjects." if state['fitted'] else ''
     print("Submitted " + ", then ".join(submitted) + "." + kept)
     print("If the check fails, the later jobs are cancelled and dtu_progress() shows why. Follow them with "
-          "dtu_progress(); dtu_clean.ipynb, dtu_all.ipynb and the room notebooks read the results at the end.")
+          "dtu_progress(); dtu_all.ipynb and the room notebooks read the results at the end.")
 
 
 def dtu_progress():
@@ -1691,19 +1691,6 @@ def dtu_progress():
     print(_cluster(f"bash -lc {shlex.quote(script)}").stdout.decode().rstrip())
 
 
-def dtu_single_talker():
-    """What the DTU single-talker trials played, and whether any sound other than the two
-    talkers' stories is speech (its length and syllable-rate envelope modulation, next to a story's). Read-only;
-    runs on the login node in about a minute."""
-    root = Path(_setting('cluster_repo')).parent
-    command = (f"cd {shlex.quote(_setting('cluster_repo'))} && "
-               + ("" if _on_cluster() else "git pull -q --no-rebase --no-edit origin main && ")
-               + f"MAMBA_ROOT_PREFIX=\"$HOME/{root}/micromamba\" \"$HOME/{root}/bin/micromamba\" run -n cocktail-cortical "
-               f"python dtu/single_talker.py")
-    proc = _cluster(f"bash -lc {shlex.quote(command)}")
-    print((proc.stdout.decode() + proc.stderr.decode()[-2000:]).rstrip())
-
-
 def _dtu_results(epoch):
     "The DTU group results for `epoch` (dtu_pipeline.py stats), read from the cluster once per session"
     if epoch not in DTU_EPOCHS:
@@ -1725,34 +1712,26 @@ def _dtu_results(epoch):
 
 
 def dtu_setup(epoch):
-    """Read the DTU results for `epoch` and set this notebook's ROI to this project's clean-speech ROI (roi.txt),
-    found from the cocktail clean-speech whole-scalp tests. Every DTU two-talker test is run within it; the DTU
-    clean-speech tests run over the whole scalp, as this project's. Prints the subjects, trials and the ROI.
-    Returns the ROI."""
+    """Read the DTU two-talker results for `epoch` and set this notebook's ROI to this project's clean-speech ROI
+    (roi.txt), found from the cocktail clean-speech whole-scalp tests. Every DTU test is run within it. Prints the
+    subjects, trials and the ROI. Returns the ROI."""
     res = _dtu_results(epoch)
     roi = res['rois']['cocktail']
     if not roi:
         raise RuntimeError("This project's ROI is missing from the DTU results: run the clean notebook, then dtu_run().")
-    configure_analysis(roi=roi, test_region='whole_scalp' if epoch == 'clean' else 'roi')
+    configure_analysis(roi=roi, test_region='roi')
     trials = sorted(set(res['n_trials'].values()))
     print(f"DTU {epoch}: {res['n_subjects']} subjects, {'/'.join(map(str, trials))} trials of 50 s each.")
     print(f"ROI, this project's clean-speech ROI ({len(roi)} sensors): {', '.join(roi)}")
-    if epoch == 'clean':
-        print("Model tests over the whole scalp (as this project's clean speech); ROI means and TRFs in the ROI above.")
-    else:
-        print("Every model test within the ROI above; ROI means and TRFs in the same ROI.")
+    print("Every model test within the ROI above; ROI means and TRFs in the same ROI.")
     return roi
 
 
 def dtu_model_test(label, epoch, metric='r'):
-    """One DTU model comparison (full model vs. without `label`), as (data, diff, result) like
-    compute_unique_contribution(): TFCE over the whole scalp for clean speech, within this project's clean-speech ROI
-    for two talkers. diff's ROI column averages that ROI."""
+    """One DTU two-talker model comparison (full model vs. without `label`), as (data, diff, result) like
+    compute_unique_contribution(): TFCE within this project's clean-speech ROI. diff's ROI column averages that ROI."""
     res = _dtu_results(epoch)
-    region = 'scalp' if epoch == 'clean' else 'cocktail'
-    if region not in res['tests']:
-        raise KeyError(f"No {region!r} analysis for DTU {epoch} (available: {list(res['tests'])})")
-    data, result = res['tests'][region][label]
+    data, result = res['tests']['cocktail'][label]
     diff = table.difference(metric, 'model', 'test', 'baseline', 'subject', data=data)
     diff[f'roi_{metric}'] = diff[metric].mean(sensor=res['rois']['cocktail'])
     return data, diff, result

@@ -14,19 +14,17 @@ Aligned with this project, step for step:
           mixture from the two stories summed (the rooms were simulated at presentation, so the exact mixture at
           the ears is not available)
   TRFs    the same boosting settings (-100 to 400 ms, 50 ms basis, l1, selective stopping, cross-validated)
-  Tests   all in this project's clean-speech ROI (roi.txt), found from the cocktail clean-speech whole-scalp
-          tests: clean speech tested over the whole scalp, as this project's; two talkers tested within that
-          ROI (one-tailed TFCE, and the ROI-averaged t-test), as this project's two-talker notebooks
+  Trials  only the 60 two-talker trials are analysed; the single-talker trials are not
+  Tests   within this project's clean-speech ROI (roi.txt, from the cocktail clean-speech whole-scalp tests),
+          as this project's two-talker notebooks (one-tailed TFCE in the ROI, and the ROI-averaged t-test)
 
 Stages (python dtu/dtu_pipeline.py <stage> [subject]):
   prepare      the story predictors, once
   rawcheck     a quick check on subject 1 that the raw file, the trial table and the triggers can be read and
                agree; the subject jobs only start if it passes
-  fit S        one subject: preprocessing (once), then the clean-speech fits on the single-talker trials and
-               the two-talker fits (full model, without each predictor, without each stream; all rooms and
+  fit S        one subject: preprocessing (once), then the two-talker fits (full model, without each predictor, without each stream; all rooms and
                each room). Saved model by model, so it resumes.
-  stats        the group tests (clean speech over the whole scalp, two talkers within this project's ROI) and
-               the TRFs, read by the dtu_*.ipynb
+  stats        the group tests within this project's ROI and the TRFs, read by the dtu_*.ipynb
 """
 import json
 import pickle
@@ -75,10 +73,6 @@ ALL_COLUMNS = [c for cs in COLUMNS.values() for c in cs]
 MODELS = {'full': ALL_COLUMNS}
 MODELS.update({f'no_{c}': [x for x in ALL_COLUMNS if x != c] for c in ALL_COLUMNS})
 MODELS.update({f'no_{s}_stream': [x for x in ALL_COLUMNS if x not in COLUMNS[s]] for s in COLUMNS})
-# Clean speech (single-talker trials), as this project's FULL_CLEAN: attended envelope + onsets
-CLEAN_MODELS = {'full': ['gammatone_8', 'gammatone_on_8'], 'no_gammatone_on_8': ['gammatone_8'],
-                'no_gammatone_8': ['gammatone_on_8']}
-CLEAN_COMPARISONS = {'Onset': 'no_gammatone_on_8', 'Envelope': 'no_gammatone_8'}
 if 'DTU_TEST_MODELS' in os.environ:  # only for testing the mechanics quickly elsewhere
     MODELS = {m: MODELS[m] for m in os.environ['DTU_TEST_MODELS'].split()}
 # The comparisons the notebook reports: label -> reduced model (each tested against the full model)
@@ -584,10 +578,7 @@ def fit(subject):
     configure(n_workers=cpus())
     path = SUBJ_DIR / f'S{subject}.pickle'
     ds = load(path) if path.exists() else preprocess(subject)
-    single = numpy.asarray(ds['n_speakers'].x == 1)
-    two = numpy.asarray(ds['n_speakers'].x == 2)
-    if single.sum() >= 1:
-        _fit_models(subject, 'clean', ds, single, CLEAN_MODELS)
+    two = numpy.asarray(ds['n_speakers'].x == 2)  # the single-talker trials are not analysed
     for epoch in EPOCHS:
         index = two if epoch == 'all' else two & numpy.asarray(ds['room'] == epoch)
         if index.sum() >= 5:
@@ -636,36 +627,14 @@ def _trfs(loaded, columns):
 
 
 def stats(samples=10000):
-    """Group results, all in this project's clean-speech ROI (roi.txt), found from the cocktail clean-speech
-    whole-scalp tests:
-      clean       TFCE over the whole scalp (as this project's clean speech); ROI means and TRFs in that ROI
-      two talkers TFCE within that ROI, as this project's two-talker conditions
-    """
+    """Group results of the two-talker trials, within this project's clean-speech ROI (roi.txt), found from the
+    cocktail clean-speech whole-scalp tests"""
     summary = {}
     cocktail_names = _names(COCKTAIL_ROI) if COCKTAIL_ROI.exists() else []
     if not cocktail_names:
         raise SystemExit(f"This project's ROI ({COCKTAIL_ROI}) is missing: run the clean notebook first")
 
-    # 1. Clean speech (single-talker trials): whole-scalp tests, as this project's clean speech
-    clean = _complete('clean', CLEAN_MODELS)
-    if len(clean) >= 3:
-        tests = {}
-        for label, reduced in CLEAN_COMPARISONS.items():
-            data, result = _test(clean, 'full', reduced, None, samples)
-            tests[label] = (data, result)
-            n = int(sum(p <= ALPHA for p in result.p.x))
-            log(f"clean {label}: t_max = {float(numpy.nanmax(result.t.x)):.2f}, "
-                f"p = {float(numpy.nanmin(result.p.x)):.3f}, {n} significant sensors")
-        names = list(result.p.sensor.names)
-        rois = {'cocktail': [n for n in cocktail_names if n in names]}
-        save({'tests': {'scalp': tests}, 'trfs': _trfs(clean, CLEAN_MODELS['full']), 'rois': rois,
-              'n_subjects': len(clean), 'n_trials': {f'S{s}': f['n_trials'] for s, f in clean.items()}},
-             RESULT_DIR / 'clean.pickle')
-        summary['clean'] = {'subjects': len(clean)}
-    else:
-        log(f"clean: only {len(clean)} subjects have clean-speech fits; skipped")
-
-    # 2. The two-talker tests, within this project's ROI
+    # The two-talker tests, within this project's ROI
     for epoch in EPOCHS:
         loaded = _complete(epoch, MODELS)
         if len(loaded) < 3:
