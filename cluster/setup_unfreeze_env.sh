@@ -42,8 +42,13 @@ if [ ! -x "$ENV_DIR/bin/python" ]; then
     touch "$MARKER"
 fi
 rm -f "$TMP_YML"
-# What building eelbrain needs, from conda-forge, so the build uses this environment's own numpy
-"$WORK/bin/micromamba" install -y -n "$ENV_NAME" -c conda-forge "cython>=3" "setuptools>=70.1" "setuptools-scm>=8" wheel
+# What building eelbrain needs, and what eelbrain needs to run (its pyproject.toml dependencies), all from
+# conda-forge: pip finds no wheels it can use for some of them on the cluster (cryptography, onnxruntime) and
+# would try to compile them. pip then installs only the branch itself (--no-deps).
+"$WORK/bin/micromamba" install -y -n "$ENV_NAME" -c conda-forge \
+    "cython>=3" "setuptools>=70.1" "setuptools-scm>=8" wheel \
+    "mne-base>=1.13" mne-bids nibabel pymatreader "colormath>=2.1" "keyring>=5" h5io appnope pillow \
+    "matplotlib-base>=3.6" "pyparsing>=3" "scipy>=1.5" seaborn
 
 if [ ! -d "$SRC/.git" ]; then
     git clone https://github.com/christianbrodbeck/Eelbrain "$SRC"
@@ -53,7 +58,7 @@ git -C "$SRC" checkout -q "$COMMIT"
 echo "eelbrain source at $(git -C "$SRC" log -1 --format='%h %ad %s' --date=short)"
 
 # The build needs a version number, and a plain checkout has no tags to take one from
-SETUPTOOLS_SCM_PRETEND_VERSION=0.43.0.dev1 "$WORK/bin/micromamba" run -n "$ENV_NAME" pip install --no-build-isolation "$SRC"
+SETUPTOOLS_SCM_PRETEND_VERSION=0.43.0.dev1 "$WORK/bin/micromamba" run -n "$ENV_NAME" pip install --no-build-isolation --no-deps "$SRC"
 
 "$WORK/bin/micromamba" run -n "$ENV_NAME" python - <<'EOF'
 import inspect
@@ -63,3 +68,9 @@ from eelbrain.pipeline import Boosting, Pipeline
 print('eelbrain', eelbrain.__version__, 'from', eelbrain.__file__)
 print('unfreeze available: OK')
 EOF
+
+# The test's own imports, so anything still missing shows here rather than in the job
+cd "$REPO/analysis"
+COCKTAIL_RESULTS=remote MPLBACKEND=Agg "$WORK/bin/micromamba" run -n "$ENV_NAME" python -c "
+import experiment, parameters, unfreeze_test
+print('analysis code imports: OK')"
