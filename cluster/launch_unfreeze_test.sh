@@ -18,7 +18,7 @@ fi
 # The test's dataset copy, and a check on this node that the pipeline opens in it (nothing is fitted),
 # so a problem shows here instead of in the job
 bash cluster/make_unfreeze_root.sh
-(cd analysis && COCKTAIL_RESULTS=remote MPLBACKEND=Agg "$WORK/bin/micromamba" run -n cocktail-cortical-unfreeze python unfreeze_test.py --check)
+(cd analysis && XDG_CACHE_HOME="$WORK/.cache" COCKTAIL_RESULTS=remote MPLBACKEND=Agg "$WORK/micromamba/envs/cocktail-cortical-unfreeze/bin/python" unfreeze_test.py --check)
 mkdir -p cluster/runs
 sbatch --account=def-ibruce ${UNFREEZE_EPOCHS:+--export=ALL,UNFREEZE_EPOCHS="$UNFREEZE_EPOCHS"} cluster/run_unfreeze_test.sbatch
 echo "Submitted. Check with: squeue -u \$USER ; log: cluster/runs/unfreeze-test-<job>.out"
