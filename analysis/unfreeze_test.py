@@ -69,6 +69,10 @@ def main():
     cls = type(ex.BinauralCocktail.__name__, (ex.BinauralCocktail,), {'estimators': estimators, '__module__': ex.__name__})
     e = cls(str(root))
     log(f"settings: {settings}; PARAMETERS: {PARAMETERS}; results in {out_dir}")
+    if '--check' in sys.argv:  # cluster/launch_unfreeze_test.sh, on the login node: the pipeline opens; nothing is fitted
+        subjects = list(e.iter('subject'))
+        log(f"check OK: pipeline opens in {root}; tasks {e._tasks}; {len(subjects)} subjects; epochs {epochs}")
+        return
 
     for epoch in epochs:
         model = MODEL.get(epoch, FULL_BASE)
