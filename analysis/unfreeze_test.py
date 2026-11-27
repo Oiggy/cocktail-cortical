@@ -12,7 +12,9 @@ For every cocktail condition one model is fitted with the same boosting settings
 `unfreeze=-1` (all predictors included again after they have all stopped, until that does not lower the
 validation error any more). The clean-speech model for 'clean', FULL_BASE for the two-talker conditions.
 Compared: the held-out correlation r (the test partition of the cross-validation, which no fitting or
-stopping decision has seen), per subject, averaged over the ROI (roi.txt of the real results) and over all sensors.
+stopping decision has seen), per subject, averaged over the ROI (roi.txt of the real results) and over all sensors;
+and, as in Christian Brodbeck's own test of the branch, explained variance (ev) per sensor, paired over subjects
+with TFCE (whole scalp and ROI; both tails, and the one-tailed unfreeze > none).
 
 Run by cluster/run_unfreeze_test.sbatch (not meant to be run by hand). Each fit is saved as soon as it is done,
 so after a TIMEOUT submit again and only what is missing is fitted.
@@ -83,6 +85,7 @@ def main():
                 'epoch': epoch, 'model': model, 'estimator': estimator, 'settings': settings, 'parameters': PARAMETERS,
                 'subjects': [str(s) for s in ds['subject']], 'sensors': list(r.sensor.names),
                 'r': numpy.asarray(r.x), 'ev': numpy.asarray(ds['ev'].x), 'seconds': time.time() - t0,
+                'ev_nd': ds['ev'], 'r_nd': r,  # with the sensor locations, for the TFCE tests
                 'eelbrain': eelbrain.__version__,
             }
             part = path.with_name(path.name + '.part')
@@ -102,6 +105,37 @@ def read_roi(real_root):
         if roi:
             return roi, str(path)
     return list(ROI_FALLBACK), 'ROI_FALLBACK (no roi.txt found)'
+
+
+def tfce_lines(epoch, a, b, roi):
+    "Paired TFCE tests of the per-sensor explained variance and r, unfreeze vs none (needs the sensor locations saved with the fits)"
+    if 'ev_nd' not in a or 'ev_nd' not in b:
+        return [f"{'':15s} (no sensor locations saved with these fits: TFCE tests skipped)"]
+    from eelbrain import Dataset, Factor, combine, testnd
+    samples = int(os.environ.get('UNFREEZE_SAMPLES', 10000))
+    out = []
+    for metric in ('ev', 'r'):
+        parts = []
+        for label, fit in (('unfreeze', b), ('none', a)):
+            ds = Dataset()
+            ds[metric] = fit[f'{metric}_nd']
+            ds['subject'] = Factor(fit['subjects'])
+            ds[:, 'estimator'] = label
+            parts.append(ds)
+        data = combine(parts)
+        for region, sensors in (('whole scalp', None), ('ROI', roi)):
+            y = metric
+            if sensors is not None:
+                data['y_roi'] = data[metric].sub(sensor=[s for s in sensors if s in a['sensors']])
+                y = 'y_roi'
+            texts = []
+            for tail, name in ((0, 'two-tailed'), (1, 'unfreeze > none')):
+                res = testnd.TTestRelated(y, 'estimator', 'unfreeze', 'none', match='subject', data=data, tail=tail, tfce=True, samples=samples)
+                t_max = float(numpy.nanmax(res.t.x if tail else numpy.abs(res.t.x)))
+                p_min = float(numpy.nanmin(res.p.x))
+                texts.append(f"{name}: t_max = {t_max:.2f}, p = {p_min:.3f}")
+            out.append(f"{'':15s} TFCE {metric:2s} {region:11s} " + '; '.join(texts))
+    return out
 
 
 def summarize(real_root, out_dir, epochs):
@@ -141,6 +175,7 @@ def summarize(real_root, out_dir, epochs):
                 f"({100 * d.mean() / ra.mean():+.2f}%)  t({len(d) - 1}) = {t:.2f}, p = {p:.3f}  "
                 f"better in {int((d > 0).sum())}/{len(d)} subjects, {100 * sensors:.0f}% of sensors")
         lines.append(f"{'':15s} fit time: none {a['seconds'] / 60:.0f} min, unfreeze {b['seconds'] / 60:.0f} min")
+        lines.extend(tfce_lines(epoch, a, b, roi))
     text = '\n'.join(lines)
     (out_dir / 'summary.txt').write_text(text + '\n')
     (out_dir / 'summary.json').write_text(json.dumps({'roi': roi, 'table': table}, indent=1))
