@@ -25,7 +25,9 @@ command -v gcc >/dev/null || { echo "No C compiler (gcc) on this node; eelbrain'
 export PIP_CONFIG_FILE=/dev/null
 unset PIP_FIND_LINKS PIP_NO_INDEX PIP_INDEX_URL PIP_EXTRA_INDEX_URL PIP_PREFER_BINARY
 
-# The main environment's recipe without eelbrain (that comes from the branch) and under another name.
+# The main environment's recipe without eelbrain (that comes from the branch) and under another name,
+# and without mne-icalabel and onnxruntime: they only label ICA components during preprocessing, which the
+# test reuses from the main analysis (and onnxruntime has no wheel pip can use here).
 # An environment made before this fix (with the cluster's wheels) is made again.
 ENV_DIR="$MAMBA_ROOT_PREFIX/envs/$ENV_NAME"
 MARKER="$ENV_DIR/.pypi-only"
@@ -34,7 +36,7 @@ if [ -d "$ENV_DIR" ] && [ ! -e "$MARKER" ]; then
     "$WORK/bin/micromamba" env remove -y -n "$ENV_NAME"
 fi
 TMP_YML="$(mktemp --suffix=.yml)"
-grep -v -E '^\s*- eelbrain' "$REPO/environment.yml" | sed "s/^name: cocktail-cortical$/name: $ENV_NAME/" > "$TMP_YML"
+grep -v -E '^\s*- (eelbrain|mne-icalabel|onnxruntime)' "$REPO/environment.yml" | sed "s/^name: cocktail-cortical$/name: $ENV_NAME/" > "$TMP_YML"
 if [ ! -x "$ENV_DIR/bin/python" ]; then
     "$WORK/bin/micromamba" create -y -n "$ENV_NAME" -f "$TMP_YML" -c conda-forge
     touch "$MARKER"
