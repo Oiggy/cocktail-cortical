@@ -197,3 +197,34 @@ Hjortkjaer 2017, NeuroImage 156:435-444 (Zenodo 1199011). Everything stays on th
    `dtu_progress()` follows them.
 3. `dtu_all.ipynb` (all rooms pooled), `dtu_anechoic.ipynb`, `dtu_mild.ipynb` and `dtu_high.ipynb` read the
    results: the same cells as `diotic.ipynb`.
+
+## Side experiment: boosting with `unfreeze` (cocktail data only)
+
+Does Christian Brodbeck's `boosting/unfreeze` branch of eelbrain improve held-out
+prediction? With `selective_stopping=1` each predictor stops when it stops helping
+on the validation data. `unfreeze=-1` includes all predictors again once they have
+all stopped, and continues until that no longer lowers the validation error.
+
+`analysis/unfreeze_test.py` fits the main analysis' model for each cocktail
+condition (the clean-speech model for `clean`, FULL_BASE for the others) twice, in
+the same eelbrain build, with the same settings as the main analysis (BOOSTING_SETTINGS,
+PARTITIONS, PARAMETERS): as is, and with `unfreeze=-1`. It compares the held-out
+correlation r per subject, in the ROI (roi.txt) and over all sensors.
+
+Nothing of the main analysis is touched. It uses its own environment
+(`cocktail-cortical-unfreeze`, the branch installed from source), its own copy of the
+dataset root (`dataset/cocktail/bids_unfreeze`: the preprocessed EEG copied, the raw
+data and predictors linked) and its own results folder
+(`bids_unfreeze/derivatives/results_unfreeze/`). analysis/experiment.py,
+parameters.py and the notebooks are only imported.
+
+From a cluster login node, in the repo root, after `git pull`:
+```
+bash cluster/launch_unfreeze_test.sh
+```
+This builds the environment if needed (login node: needs the internet) and submits
+the job; after that the laptop can be switched off, and Slurm emails when the job
+ends or fails. The result is `summary.txt` in the results folder above. Each fit is
+saved as it finishes, so after a TIMEOUT run the same command again. Only some
+conditions: `UNFREEZE_EPOCHS="diotic binaural" bash cluster/launch_unfreeze_test.sh`
+(conditions: diotic, dichotic, dichotic-left, dichotic-right, binaural, clean).
